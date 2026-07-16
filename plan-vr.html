@@ -1,0 +1,370 @@
+<title>Wispy Puff VR — Plan d'architecture</title>
+<style>
+  :root{
+    --bg:#080c22; --bg-2:#0e1338; --bg-3:#141c47;
+    --ink:#eaeefb; --ink-soft:#a7b0d8; --ink-faint:#6b76a3;
+    --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.14);
+    --teal:#3fe0d0; --teal-dim:rgba(63,224,208,.14);
+    --magenta:#d160e6; --magenta-dim:rgba(209,96,230,.14);
+    --amber:#ffb84d;
+    --good:#57d98a; --warn:#ffb84d;
+    --shadow:0 24px 60px -30px rgba(0,0,0,.8);
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+    --mono:"Cascadia Code","SF Mono","JetBrains Mono",Consolas,"Liberation Mono",monospace;
+  }
+  @media (prefers-color-scheme:light){
+    :root{
+      --bg:#eceef8; --bg-2:#ffffff; --bg-3:#f5f6fd;
+      --ink:#161c33; --ink-soft:#4a5178; --ink-faint:#8a93bd;
+      --line:rgba(20,28,70,.12); --line-2:rgba(20,28,70,.2);
+      --teal:#0f9c8e; --teal-dim:rgba(15,156,142,.12);
+      --magenta:#a233c0; --magenta-dim:rgba(162,51,192,.1);
+      --amber:#b9791a;
+      --good:#1f9d5b; --warn:#b9791a;
+      --shadow:0 20px 50px -28px rgba(30,40,90,.45);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#080c22; --bg-2:#0e1338; --bg-3:#141c47;
+    --ink:#eaeefb; --ink-soft:#a7b0d8; --ink-faint:#6b76a3;
+    --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.14);
+    --teal:#3fe0d0; --teal-dim:rgba(63,224,208,.14);
+    --magenta:#d160e6; --magenta-dim:rgba(209,96,230,.14);
+    --amber:#ffb84d; --good:#57d98a; --warn:#ffb84d;
+    --shadow:0 24px 60px -30px rgba(0,0,0,.8);
+  }
+  :root[data-theme="light"]{
+    --bg:#eceef8; --bg-2:#ffffff; --bg-3:#f5f6fd;
+    --ink:#161c33; --ink-soft:#4a5178; --ink-faint:#8a93bd;
+    --line:rgba(20,28,70,.12); --line-2:rgba(20,28,70,.2);
+    --teal:#0f9c8e; --teal-dim:rgba(15,156,142,.12);
+    --magenta:#a233c0; --magenta-dim:rgba(162,51,192,.1);
+    --amber:#b9791a; --good:#1f9d5b; --warn:#b9791a;
+    --shadow:0 20px 50px -28px rgba(30,40,90,.45);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:
+      radial-gradient(1200px 700px at 78% -10%, var(--magenta-dim), transparent 60%),
+      radial-gradient(1000px 600px at 12% 8%, var(--teal-dim), transparent 55%),
+      var(--bg);
+    color:var(--ink); font-family:var(--sans); line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:74rem; margin:0 auto; padding:clamp(1.2rem,4vw,3rem)}
+  .col{max-width:66rem; margin:0 auto}
+
+  .eyebrow{font-size:.72rem; text-transform:uppercase; letter-spacing:.18em; color:var(--teal); font-weight:600}
+  h1{font-family:var(--serif); font-weight:600; font-size:clamp(2.1rem,5.5vw,3.4rem); line-height:1.05; margin:.5rem 0 .4rem; text-wrap:balance; letter-spacing:-.01em}
+  h2{font-family:var(--serif); font-weight:600; font-size:clamp(1.35rem,3vw,1.7rem); margin:0 0 .2rem; text-wrap:balance}
+  h3{font-size:1rem; margin:0 0 .3rem; letter-spacing:.01em}
+  p{margin:.5rem 0}
+  a{color:var(--teal)}
+  .lede{font-size:clamp(1.05rem,2.2vw,1.22rem); color:var(--ink-soft); max-width:40ch; text-wrap:balance}
+
+  /* hero decision chips */
+  .chips{display:flex; flex-wrap:wrap; gap:.5rem; margin-top:1.4rem}
+  .chip{display:inline-flex; align-items:center; gap:.5rem; padding:.5rem .8rem; border:1px solid var(--line-2); border-radius:999px; background:var(--bg-2); font-size:.85rem; color:var(--ink-soft)}
+  .chip b{color:var(--ink); font-weight:600}
+  .chip .k{font-size:.68rem; text-transform:uppercase; letter-spacing:.12em; color:var(--teal)}
+
+  section{margin-top:clamp(2.4rem,6vw,4rem)}
+  .sec-head{display:flex; align-items:baseline; gap:.8rem; margin-bottom:1.2rem}
+  .sec-head .n{font-family:var(--mono); font-size:.8rem; color:var(--magenta); border:1px solid var(--line-2); border-radius:.4rem; padding:.15rem .45rem; flex:0 0 auto}
+
+  .panel{background:var(--bg-2); border:1px solid var(--line); border-radius:16px; padding:clamp(1.1rem,2.5vw,1.6rem); box-shadow:var(--shadow)}
+
+  /* ---- Z-depth diagram ---- */
+  .stage-wrap{overflow:hidden; border-radius:16px; border:1px solid var(--line); background:
+      linear-gradient(180deg, var(--bg-3), var(--bg-2));
+    padding:2.5rem 1rem 2rem}
+  .stage{perspective:1300px; height:340px; display:flex; align-items:center; justify-content:center}
+  .planes{position:relative; transform-style:preserve-3d; transform:rotateX(6deg) rotateY(-34deg); width:260px; height:180px}
+  .plane{position:absolute; inset:0; border-radius:10px; border:1px solid var(--line-2);
+    display:flex; align-items:flex-start; justify-content:flex-start; padding:.55rem .7rem;
+    font-size:.72rem; letter-spacing:.02em; box-shadow:0 10px 30px -12px rgba(0,0,0,.6)}
+  .plane .tag{background:rgba(0,0,0,.35); color:#fff; padding:.15rem .45rem; border-radius:.35rem; font-family:var(--mono); font-size:.66rem}
+  :root[data-theme="light"] .plane .tag{background:rgba(255,255,255,.75); color:#161c33}
+  @media (prefers-color-scheme:light){.plane .tag{background:rgba(255,255,255,.75); color:#161c33}}
+  .p1{transform:translateZ(-120px); background:linear-gradient(160deg,#111a44,#0a1030)}
+  .p2{transform:translateZ(-60px); background:linear-gradient(160deg,#182a63,#12204f)}
+  .p3{transform:translateZ(0px); background:linear-gradient(160deg,#1d3b7a,#173063); border-color:var(--teal)}
+  .p4{transform:translateZ(70px); background:linear-gradient(160deg,#22407e,#1a2c57)}
+  .p5{transform:translateZ(130px); background:linear-gradient(160deg, rgba(63,224,208,.10), rgba(209,96,230,.10)); border:1.5px solid var(--teal)}
+  .p3 .tag{background:var(--teal); color:#04211d}
+  .actors{position:absolute; left:50%; top:52%; transform:translate(-50%,-50%); display:flex; align-items:center; gap:14px}
+  .bubble{width:34px; height:34px; border-radius:50%;
+    background:radial-gradient(circle at 32% 28%, #fff, rgba(255,255,255,.25) 30%, rgba(63,224,208,.5) 55%, rgba(209,96,230,.55) 100%);
+    box-shadow:0 0 18px rgba(63,224,208,.6), inset 0 0 8px rgba(255,255,255,.5)}
+  .ghost{width:22px; height:26px; border-radius:50% 50% 46% 46%/ 60% 60% 40% 40%; background:#eef; opacity:.92; box-shadow:0 0 10px rgba(255,255,255,.5); position:relative}
+  .puff{position:absolute; right:-16px; top:8px; width:0;height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-left:14px solid rgba(63,224,208,.5)}
+  .legend{display:flex; flex-wrap:wrap; gap:.5rem 1.1rem; margin-top:1.3rem; justify-content:center; font-size:.8rem; color:var(--ink-soft)}
+  .legend span{display:inline-flex; align-items:center; gap:.4rem}
+  .dot{width:10px;height:10px;border-radius:2px;display:inline-block}
+
+  /* ---- data flow ---- */
+  .flow{display:grid; grid-template-columns:1fr auto 1fr; gap:1rem; align-items:stretch}
+  .flow .card{background:var(--bg-3); border:1px solid var(--line); border-radius:12px; padding:1rem}
+  .flow .card.kept{border-color:var(--teal); box-shadow:inset 0 0 0 1px var(--teal-dim)}
+  .flow .card.new{border-color:var(--magenta); box-shadow:inset 0 0 0 1px var(--magenta-dim)}
+  .flow .mid{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.4rem; color:var(--ink-faint)}
+  .flow .arrow{font-size:1.4rem; color:var(--teal)}
+  .flow code, .mono{font-family:var(--mono); font-size:.82rem}
+  .tagline{font-size:.7rem; text-transform:uppercase; letter-spacing:.13em; margin-bottom:.4rem; font-weight:600}
+  .tagline.kept{color:var(--teal)} .tagline.new{color:var(--magenta)}
+  .flow ul{margin:.4rem 0 0; padding-left:1.1rem} .flow li{margin:.2rem 0; font-size:.9rem; color:var(--ink-soft)}
+
+  /* ---- tables ---- */
+  .tbl-scroll{overflow-x:auto; border-radius:12px; border:1px solid var(--line)}
+  table{border-collapse:collapse; width:100%; min-width:32rem; font-size:.92rem}
+  th,td{text-align:left; padding:.7rem .9rem; border-bottom:1px solid var(--line); vertical-align:top}
+  thead th{background:var(--bg-3); font-size:.72rem; text-transform:uppercase; letter-spacing:.1em; color:var(--ink-faint); font-weight:600}
+  tbody tr:last-child td{border-bottom:0}
+  td .mono{color:var(--ink)}
+  .pill{display:inline-block; padding:.12rem .5rem; border-radius:999px; font-size:.72rem; font-weight:600; white-space:nowrap}
+  .pill.keep{background:var(--teal-dim); color:var(--teal)}
+  .pill.make{background:var(--magenta-dim); color:var(--magenta)}
+
+  /* ---- roadmap ---- */
+  .road{display:grid; gap:1rem}
+  .step{display:grid; grid-template-columns:auto 1fr; gap:1.1rem; background:var(--bg-2); border:1px solid var(--line); border-radius:14px; padding:1.1rem 1.2rem; position:relative}
+  .step .idx{font-family:var(--serif); font-size:1.6rem; line-height:1; color:var(--teal); width:2.4rem; height:2.4rem; display:grid; place-items:center; border:1px solid var(--line-2); border-radius:50%; flex:0 0 auto}
+  .step .goal{font-size:.72rem; text-transform:uppercase; letter-spacing:.12em; color:var(--magenta); font-weight:600; margin-top:.35rem}
+  .step h3{margin-top:.05rem}
+  .step .out{margin-top:.5rem; font-size:.85rem; color:var(--ink-soft); display:flex; gap:.5rem; align-items:baseline}
+  .step .out b{color:var(--good)}
+
+  /* ---- two-col utility ---- */
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:1rem}
+  .mini{background:var(--bg-2); border:1px solid var(--line); border-radius:12px; padding:1rem 1.1rem}
+  .mini h3{display:flex; align-items:center; gap:.5rem}
+  .mini ul{margin:.5rem 0 0; padding-left:1.05rem} .mini li{margin:.35rem 0; color:var(--ink-soft); font-size:.92rem}
+  .key{font-family:var(--mono); font-size:.78rem; background:var(--bg-3); border:1px solid var(--line-2); border-radius:.4rem; padding:.12rem .4rem; color:var(--ink)}
+
+  .note{border-left:3px solid var(--teal); background:var(--teal-dim); padding:.8rem 1rem; border-radius:0 10px 10px 0; font-size:.92rem; color:var(--ink-soft)}
+  .note b{color:var(--ink)}
+
+  footer{margin-top:3.5rem; padding-top:1.4rem; border-top:1px solid var(--line); color:var(--ink-faint); font-size:.82rem; display:flex; justify-content:space-between; flex-wrap:wrap; gap:.6rem}
+
+  @media (max-width:720px){
+    .flow{grid-template-columns:1fr} .flow .mid{flex-direction:row; padding:.2rem} .flow .arrow{transform:rotate(90deg)}
+    .grid2{grid-template-columns:1fr}
+    .planes{transform:rotateX(8deg) rotateY(-26deg) scale(.9)}
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .bubble{animation:bob 4s ease-in-out infinite}
+    @keyframes bob{50%{transform:translateY(-5px)}}
+  }
+</style>
+
+<div class="wrap">
+<div class="col">
+
+  <header>
+    <div class="eyebrow">Wispy Puff · Portage VR — Meta Quest</div>
+    <h1>Le jeu devient un théâtre de papier</h1>
+    <p class="lede">Porter le jeu en VR façon livre pop-up — le décor prend de la profondeur, la physique ne change pas.</p>
+
+    <div class="chips">
+      <span class="chip"><span class="k">Moteur</span> <b>WebXR + three.js</b></span>
+      <span class="chip"><span class="k">Logique</span> <b>game.js réutilisé</b></span>
+      <span class="chip"><span class="k">Rendu</span> <b>calques en profondeur</b></span>
+      <span class="chip"><span class="k">Test</span> <b>navigateur du Quest (URL)</b></span>
+    </div>
+  </header>
+
+  <!-- 1. Principe visuel -->
+  <section>
+    <div class="sec-head"><span class="n">01</span><h2>Le principe visuel : la scène en tranches de profondeur</h2></div>
+    <p style="color:var(--ink-soft); max-width:60ch">Un décor plat est découpé en plans posés à des <b style="color:var(--ink)">profondeurs Z différentes</b>. Le rendu stéréo du casque fait le relief tout seul. Tout le jeu reste « plat » — <b style="color:var(--ink)">sauf la bulle</b>, seul objet réellement volumétrique.</p>
+
+    <div class="stage-wrap" style="margin-top:1.1rem">
+      <div class="stage">
+        <div class="planes">
+          <div class="plane p1"><span class="tag">Z −120 · ciel lointain</span></div>
+          <div class="plane p2"><span class="tag">Z −60 · arrière-plan</span></div>
+          <div class="plane p3"><span class="tag">Z 0 · plan d'action</span>
+            <div class="actors">
+              <div class="ghost"><span class="puff"></span></div>
+              <div class="bubble"></div>
+            </div>
+          </div>
+          <div class="plane p4"><span class="tag">Z +70 · avant-plan</span></div>
+          <div class="plane p5"><span class="tag">Z +130 · cadre de théâtre</span></div>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i class="dot" style="background:#3fe0d0"></i> Plan d'action (Z 0) — bulle, fantôme, obstacles, collisions</span>
+        <span><i class="dot" style="background:#3f5aa8"></i> Décor éclaté en calques</span>
+        <span><i class="dot" style="background:linear-gradient(90deg,#3fe0d0,#d160e6)"></i> Cadre fixe = repère anti-nausée</span>
+      </div>
+    </div>
+    <p class="note" style="margin-top:1rem"><b>Pourquoi la physique ne bouge pas :</b> bulle, fantôme et obstacles vivent tous sur <b>un seul plan à Z 0</b>. Les collisions restent en 2D, exactement comme aujourd'hui. Seul le décor est distribué en profondeur.</p>
+  </section>
+
+  <!-- 2. Le pont technique -->
+  <section>
+    <div class="sec-head"><span class="n">02</span><h2>Le pont technique : ce qu'on garde, ce qu'on écrit</h2></div>
+    <div class="panel">
+      <div class="flow">
+        <div class="card kept">
+          <div class="tagline kept">Réutilisé · game.js</div>
+          <div class="mono" style="color:var(--ink)">update(dt)</div>
+          <ul>
+            <li>physique du souffle</li>
+            <li>collisions <code>collidePolys()</code></li>
+            <li>données <code>LEVELS</code></li>
+          </ul>
+          <p class="mono" style="margin:.6rem 0 0; color:var(--teal)">→ bubble.x / ghost.x / angle</p>
+        </div>
+        <div class="mid">
+          <div class="arrow">→</div>
+          <div style="font-size:.7rem; text-transform:uppercase; letter-spacing:.12em; text-align:center">chaque<br>frame</div>
+        </div>
+        <div class="card new">
+          <div class="tagline new">À écrire · three.js</div>
+          <div class="mono" style="color:var(--ink)">scène 3D</div>
+          <ul>
+            <li>sphere.position = (x,y,0)</li>
+            <li>ghostSprite → (x,y,0)</li>
+            <li>calques décor en Z</li>
+          </ul>
+          <p class="mono" style="margin:.6rem 0 0; color:var(--magenta)">→ rendu stéréo casque</p>
+        </div>
+      </div>
+    </div>
+    <p style="color:var(--ink-soft); max-width:62ch">La logique <b style="color:var(--ink)">calcule</b> les positions (déjà le cas). La 3D ne fait que les <b style="color:var(--ink)">suivre</b>. Aucune physique à réécrire.</p>
+  </section>
+
+  <!-- 3. Comment on rend chaque chose -->
+  <section>
+    <div class="sec-head"><span class="n">03</span><h2>Comment chaque élément est rendu</h2></div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Élément</th><th>Rendu en VR</th><th>Source</th><th>3D à modéliser&nbsp;?</th></tr></thead>
+        <tbody>
+          <tr><td><b>Décor</b></td><td>calques plats posés en profondeur</td><td class="mono">DALL·E en morceaux</td><td><span class="pill keep">Non</span></td></tr>
+          <tr><td><b>Fantôme</b></td><td>sprite 2D (découpe papier), pivote à plat sur Z 0</td><td class="mono">ghost.png</td><td><span class="pill keep">Non</span></td></tr>
+          <tr><td><b>Bulle</b> ⭐</td><td>vraie <b>sphère 3D</b> + matériau savon irisé (preset)</td><td class="mono">primitive three.js</td><td><span class="pill keep">Non</span></td></tr>
+          <tr><td><b>Souffle</b></td><td>cône de particules émis de la bouche</td><td class="mono">système de particules</td><td><span class="pill keep">Non</span></td></tr>
+          <tr><td><b>Obstacles</b></td><td>sprites 2D sur Z 0 (pics, rochers, flammes)</td><td class="mono">assets existants</td><td><span class="pill keep">Non</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:1rem"><b>La bulle est le héros.</b> Une bulle de savon <i>est</i> une sphère — la forme la plus simple en 3D. three.js fournit sphère + matériau verre/irisé gratuitement. C'est le seul objet réellement volumétrique, et il ne coûte aucune compétence graphique.</p>
+  </section>
+
+  <!-- 4. Roadmap -->
+  <section>
+    <div class="sec-head"><span class="n">04</span><h2>Feuille de route du prototype — un niveau</h2></div>
+    <div class="road">
+      <div class="step">
+        <div class="idx">0</div>
+        <div>
+          <div class="goal">Valider le pipeline · ~½ jour</div>
+          <h3>Être « dans le casque »</h3>
+          <p style="color:var(--ink-soft); margin:.2rem 0 0">Scène three.js/WebXR minimale : un simple quad texturé qui affiche le canvas de <span class="key">game.js</span> tel quel. Pas encore de profondeur — mais le jeu tourne dans le Quest.</p>
+          <div class="out"><b>✓</b> le jeu s'ouvre en VR via une URL</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">1</div>
+        <div>
+          <div class="goal">Rendre jouable · contrôles</div>
+          <h3>Brancher les manettes Touch</h3>
+          <p style="color:var(--ink-soft); margin:.2rem 0 0">Stick gauche = déplacer le fantôme · rayon manette droite = viser · gâchette = souffler. On câble sur les entrées existantes de <span class="key">game.js</span>.</p>
+          <div class="out"><b>✓</b> on joue assis, à la manette</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">2</div>
+        <div>
+          <div class="goal">Le cœur · profondeur</div>
+          <h3>Éclater le niveau 1 en calques</h3>
+          <p style="color:var(--ink-soft); margin:.2rem 0 0">Décor en morceaux placés en Z · plan d'action sur Z 0 (canvas « sprites dynamiques » seulement, fond transparent) · bulle en sphère 3D · cadre de théâtre fixe.</p>
+          <div class="out"><b>✓</b> l'effet pop-up WitchBlood apparaît</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">3</div>
+        <div>
+          <div class="goal">Finition · confort</div>
+          <h3>Scroll + 72 fps stables</h3>
+          <p style="color:var(--ink-soft); margin:.2rem 0 0">La scène glisse devant un spectateur immobile · avant-plan calmé · fond répété en miroir. Validation du confort et du framerate.</p>
+          <div class="out"><b>✓</b> prototype représentatif d'un niveau</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. Décors + Contrôles + Confort -->
+  <section>
+    <div class="sec-head"><span class="n">05</span><h2>Décors, contrôles &amp; confort</h2></div>
+
+    <div class="mini" style="margin-bottom:1rem">
+      <h3><span class="dot" style="background:var(--magenta)"></span> Décors : générer en morceaux, jamais coller des fresques</h3>
+      <ul>
+        <li><b>Fond &amp; sol</b> → une seule tuile DALL·E, <b>répétée en miroir</b> (une tuile sur deux inversée) → aucune couture, largeur illimitée. <span class="key">game.js le fait déjà</span></li>
+        <li><b>Plateformes, portail, cristaux…</b> → chaque objet généré <b>isolé sur fond uni</b> (point fort de DALL·E) → découpe triviale, zéro trou à reboucher</li>
+        <li>On <b>peuple</b> le niveau en posant les objets par position x/y — exactement la logique de <span class="key">props / movers</span> existante</li>
+      </ul>
+    </div>
+
+    <div class="grid2">
+      <div class="mini">
+        <h3><span class="dot" style="background:var(--teal)"></span> Contrôles Touch</h3>
+        <ul>
+          <li><span class="key">Stick gauche</span> déplacer le fantôme (2 axes, arrêt net)</li>
+          <li><span class="key">Rayon manette droite</span> viser le souffle</li>
+          <li><span class="key">Gâchette</span> souffler</li>
+          <li>Main tracking possible plus tard, en option — moins précis pour le timing</li>
+        </ul>
+      </div>
+      <div class="mini">
+        <h3><span class="dot" style="background:var(--good)"></span> Confort VR</h3>
+        <ul>
+          <li>Caméra <b>fixe</b> = pas de locomotion = source n°1 de nausée éliminée</li>
+          <li>La scène <b>glisse</b>, le spectateur ne bouge pas</li>
+          <li><b>Cadre de théâtre fixe</b> = repère stable pour l'œil</li>
+          <li>Avant-plan calmé · pas d'explosion collée aux yeux · 72/90 fps</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. Réutilisé / à créer -->
+  <section>
+    <div class="sec-head"><span class="n">06</span><h2>Bilan : réutilisé vs à créer</h2></div>
+    <div class="grid2">
+      <div class="mini" style="border-color:var(--teal)">
+        <h3 style="color:var(--teal)">Réutilisé tel quel</h3>
+        <ul>
+          <li>Physique du souffle, <span class="key">update()</span></li>
+          <li>Collisions <span class="key">collidePolys()</span></li>
+          <li>Données des 7 niveaux <span class="key">LEVELS</span> (polys, movers, rocks, portail, clé)</li>
+          <li>Les 112 assets PNG</li>
+          <li>Répétition de fond en miroir (déjà codée)</li>
+        </ul>
+      </div>
+      <div class="mini" style="border-color:var(--magenta)">
+        <h3 style="color:var(--magenta)">À créer</h3>
+        <ul>
+          <li>Couche de rendu three.js (calques Z, caméra, cadre)</li>
+          <li>Découpe / génération des décors en morceaux</li>
+          <li>Bulle-sphère + matériau savon</li>
+          <li>Contrôles Touch (stick / rayon / gâchette)</li>
+          <li><b>Abandonné :</b> la branche Flutter/Flame</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Wispy Puff VR — plan d'architecture · WebXR + three.js</span>
+    <span>Aucune ligne de code encore écrite · direction validée avant build</span>
+  </footer>
+
+</div>
+</div>

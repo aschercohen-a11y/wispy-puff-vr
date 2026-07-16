@@ -1,0 +1,8 @@
+tools/
+.git/
+*.log
+serve.ps1
+plan-vr.html
+Dockerfile
+.dockerignore
+.gitignore

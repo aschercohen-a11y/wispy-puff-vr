@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Wispy Puff VR — Étape 0</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; background:#05070f; overflow:hidden; font-family:'Trebuchet MS','Segoe UI',sans-serif; color:#dbe6ff; }
+
+  /* Le jeu 2D tourne dans ce canvas, mais on le cache hors écran :
+     three.js le récupère comme texture. Le canvas continue de se dessiner même hors-vue. */
+  #wrap { position:fixed; left:-99999px; top:0; }
+
+  /* Petit bandeau d'info visible sur le bureau (pas dans le casque) */
+  #info {
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    padding:12px 16px; text-align:center; font-size:14px;
+    background:linear-gradient(180deg,rgba(10,16,40,0),rgba(10,16,40,.85));
+    color:#9fb6e6; pointer-events:none;
+  }
+  #info b { color:#cfe4ff; }
+  /* Le bouton "ENTER VR" de three.js est stylé par la lib ; on le laisse tel quel. */
+</style>
+
+<!-- three.js en local (aucune dépendance internet) -->
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+
+<!-- ================================================================
+     1) DOM attendu par game.js (canvas + overlays).
+        Repris à l'identique de l'index d'origine, mais placé hors écran.
+        game.js appelle el('menu'), el('hud')… : ces éléments DOIVENT exister.
+     ================================================================ -->
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="hidden">
+    <span>Niveau <b id="hud-level">1</b></span>
+    <span>Bulles <b id="hud-lives">3</b></span>
+    <span>Score <b id="hud-score">0</b></span>
+    <span>Temps <b id="hud-time">0s</b></span>
+  </div>
+
+  <div id="menu" class="overlay">
+    <img id="btn-start" src="assets/boutonPlay.png" alt="start" />
+    <div id="lvlbtns"></div>
+    <button id="btn-editor">editor</button>
+  </div>
+  <div id="levelclear" class="overlay hidden"><button id="btn-next">next</button></div>
+  <div id="gameover" class="overlay hidden"><button id="btn-retry">retry</button></div>
+  <div id="victory" class="overlay hidden"><button id="btn-replay">replay</button></div>
+</div>
+
+<div id="info">Wispy Puff VR · Étape 0 — appuie sur <b>ENTER VR</b> (en bas) avec le casque. Sur PC tu vois l'écran flottant à la souris.</div>
+
+<!-- ================================================================
+     2) SHIM requestAnimationFrame — DOIT s'exécuter AVANT game.js.
+        En VR, le rAF classique de la fenêtre est gelé pendant la session XR.
+        On capture donc la boucle de game.js pour la piloter nous-mêmes
+        depuis la boucle d'animation XR de three.js (voir plus bas).
+     ================================================================ -->
+<script>
+  window.__gameCB = null;
+  const __realRAF = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = function (cb) { window.__gameCB = cb; return 0; };
+  // Avance d'une image la logique du jeu (appelé par three.js à chaque frame casque)
+  window.__tickGame = function (nowMs) {
+    const cb = window.__gameCB;
+    if (cb) { window.__gameCB = null; cb(nowMs); }
+  };
+</script>
+
+<!-- 3) Le jeu, inchangé -->
+<script src="game.js"></script>
+
+<!-- 4) Init : canvas à résolution fixe + démarrage direct d'un niveau -->
+<script>
+  // game.js a déjà lancé sa boucle (capturée par le shim, en pause tant que three.js ne tick pas).
+  // On fige le canvas à la résolution native du monde (1280×720) pour une texture nette.
+  window.removeEventListener('resize', resize); // neutralise le redimensionnement fenêtre
+  canvas.width = 1280;
+  canvas.height = 720;
+  scale = 1; viewX = 0; viewY = 0;
+  startGame();                 // charge le niveau image et passe en GS.PLAY (pas de menu à cliquer)
+</script>
+
+<!-- 5) Scène WebXR : l'écran flottant -->
+<script type="module">
+  import * as THREE from 'three';
+  import { VRButton } from './vendor/VRButton.js';
+
+  const gameCanvas = document.getElementById('game');
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05070f);
+
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 100);
+  camera.position.set(0, 1.6, 0); // hauteur des yeux (assis/debout) ; le casque prend le relais en VR
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.xr.enabled = true;
+  renderer.xr.setReferenceSpaceType('local-floor');
+  document.body.appendChild(renderer.domElement);
+  document.body.appendChild(VRButton.createButton(renderer));
+
+  // --- Écran flottant texturé par le canvas du jeu ---
+  const tex = new THREE.CanvasTexture(gameCanvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+
+  const screenW = 3.2, screenH = screenW * 720 / 1280; // 16:9
+  const screen = new THREE.Mesh(
+    new THREE.PlaneGeometry(screenW, screenH),
+    new THREE.MeshBasicMaterial({ map: tex })
+  );
+  screen.position.set(0, 1.55, -2.6); // devant, à hauteur d'yeux
+  scene.add(screen);
+
+  // Léger halo derrière l'écran (ambiance) + sol repère pour le confort
+  const glow = new THREE.Mesh(
+    new THREE.PlaneGeometry(screenW * 1.14, screenH * 1.22),
+    new THREE.MeshBasicMaterial({ color: 0x1b2a66, transparent: true, opacity: 0.5 })
+  );
+  glow.position.set(0, 1.55, -2.63);
+  scene.add(glow);
+
+  const grid = new THREE.GridHelper(10, 20, 0x2a3a7a, 0x141d40);
+  grid.position.y = 0;
+  scene.add(grid);
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // --- Boucle : on avance le jeu, on rafraîchit la texture, on rend en stéréo ---
+  renderer.setAnimationLoop((time) => {
+    window.__tickGame(time);   // fait tourner game.js d'une image (dans le canvas 2D)
+    tex.needsUpdate = true;    // repousse le canvas vers le GPU
+    renderer.render(scene, camera);
+  });
+</script>
+</body>
+</html>
