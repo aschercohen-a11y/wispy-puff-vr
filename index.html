@@ -80,11 +80,9 @@
   };
 
   startGame();                 // charge le niveau image et passe en GS.PLAY (pas de menu à cliquer)
-
-  // PROFONDEUR : on retire le décor peint du canvas de jeu (render() efface déjà en transparent).
-  // Le canvas ne contient alors QUE le fantôme + la bulle + les effets, sur fond transparent.
-  // Le décor (level1.png) est affiché sur un plan SÉPARÉ, en retrait, par three.js (voir module).
-  drawSceneBackground = function () {};
+  // Note : le jeu (décor + obstacles + fantôme + bulle) est rendu ENTIER sur un seul plan
+  //        → tout est cohérent, à la même profondeur. Le relief interne (pop-up) viendra
+  //        quand on découpera le décor en calques (obstacles au plan de jeu, fond au loin).
 </script>
 
 <!-- 5) Scène WebXR : l'écran flottant -->
@@ -125,20 +123,6 @@
   );
   screen.position.set(0, ACTION_Y, ACTION_Z);
   scene.add(screen);
-
-  // --- PLAN DÉCOR (Z arrière) : level1.png peint, en retrait → profondeur stéréo ---
-  const DECOR_Z = -2.98;
-  // taille agrandie pour couvrir le même angle visuel que le plan d'action (aligné de face, parallaxe de côté)
-  const decorW = screenW * (Math.abs(DECOR_Z) / Math.abs(ACTION_Z));
-  const decorH = decorW * 720 / 1280;
-  const decorTex = new THREE.TextureLoader().load('assets/level1.png');
-  decorTex.colorSpace = THREE.SRGBColorSpace;
-  const decor = new THREE.Mesh(
-    new THREE.PlaneGeometry(decorW, decorH),
-    new THREE.MeshBasicMaterial({ map: decorTex })
-  );
-  decor.position.set(0, ACTION_Y, DECOR_Z);
-  scene.add(decor);
 
   const grid = new THREE.GridHelper(10, 20, 0x2a3a7a, 0x141d40);
   grid.position.y = 0;
