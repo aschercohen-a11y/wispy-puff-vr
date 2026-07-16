@@ -60,13 +60,25 @@
 <!-- 2) Le jeu, inchangé (il pilote sa propre boucle via requestAnimationFrame) -->
 <script src="game.js"></script>
 
-<!-- 3) Init : canvas à résolution fixe + démarrage direct d'un niveau -->
+<!-- 3) Init : canvas à résolution fixe + passerelle manettes + démarrage du niveau -->
 <script>
   // On fige le canvas à la résolution native du monde (1280×720) pour une texture nette.
   window.removeEventListener('resize', resize); // neutralise le redimensionnement fenêtre
   canvas.width = 1280;
   canvas.height = 720;
   scale = 1; viewX = 0; viewY = 0;
+
+  // Passerelle entrées VR → variables de game.js (ce script classique voit sticks/ghost/keys).
+  // mv  : {x,y} du stick gauche (-1..1) ou null (relâché) → déplacement
+  // aim : {x,y} du stick droit ou null → oriente le fantôme (garde la direction si null)
+  // blow: booléen (gâchette) → souffle
+  window.__vrInput = function (mv, aim, blow) {
+    if (mv) { sticks.move.id = 'vr'; sticks.move.kx = mv.x * STICK_MAX; sticks.move.ky = mv.y * STICK_MAX; }
+    else    { sticks.move.id = null; sticks.move.kx = 0; sticks.move.ky = 0; }
+    if (aim) { ghost.angle = Math.atan2(aim.y, aim.x); }
+    keys['Space'] = !!blow;
+  };
+
   startGame();                 // charge le niveau image et passe en GS.PLAY (pas de menu à cliquer)
 </script>
 
@@ -136,8 +148,35 @@
   renderer.xr.addEventListener('sessionstart', () => { presenting = true; });
   renderer.xr.addEventListener('sessionend', () => { presenting = false; if (typeof window.loop === 'function') realRAF(window.loop); });
 
+  // --- Lecture des manettes Touch (mapping xr-standard) ---
+  // Stick : axes[2]=X, axes[3]=Y. Gâchette : buttons[0].
+  function readVRInput() {
+    const session = renderer.xr.getSession();
+    if (!session) return;
+    const DZ_MOVE = 0.18, DZ_AIM = 0.5;
+    let mv = null, aim = null, blow = false;
+    for (const src of session.inputSources) {
+      const gp = src.gamepad;
+      if (!gp) continue;
+      const a = gp.axes || [];
+      const sx = a.length >= 4 ? a[2] : (a[0] || 0);
+      const sy = a.length >= 4 ? a[3] : (a[1] || 0);
+      if (gp.buttons && gp.buttons[0] && gp.buttons[0].pressed) blow = true; // gâchette = souffler
+      const mag = Math.hypot(sx, sy);
+      if (src.handedness === 'right') {
+        if (mag > DZ_AIM) aim = { x: sx, y: sy };            // stick droit = viser
+      } else {
+        if (mag > DZ_MOVE) mv = { x: sx, y: sy };            // stick gauche (ou défaut) = déplacer
+      }
+    }
+    if (window.__vrInput) window.__vrInput(mv, aim, blow);
+  }
+
   renderer.setAnimationLoop((time) => {
-    if (presenting && typeof window.loop === 'function') window.loop(time); // avance le jeu en VR
+    if (presenting) {
+      readVRInput();                                          // manettes → entrées du jeu
+      if (typeof window.loop === 'function') window.loop(time); // avance le jeu en VR
+    }
     tex.needsUpdate = true;   // repousse le canvas (2D) vers le GPU
     renderer.render(scene, camera);
   });
