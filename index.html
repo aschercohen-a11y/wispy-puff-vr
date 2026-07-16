@@ -57,29 +57,11 @@
 
 <div id="info">Wispy Puff VR · Étape 0 — appuie sur <b>ENTER VR</b> (en bas) avec le casque. Sur PC tu vois l'écran flottant à la souris.</div>
 
-<!-- ================================================================
-     2) SHIM requestAnimationFrame — DOIT s'exécuter AVANT game.js.
-        En VR, le rAF classique de la fenêtre est gelé pendant la session XR.
-        On capture donc la boucle de game.js pour la piloter nous-mêmes
-        depuis la boucle d'animation XR de three.js (voir plus bas).
-     ================================================================ -->
-<script>
-  window.__gameCB = null;
-  const __realRAF = window.requestAnimationFrame.bind(window);
-  window.requestAnimationFrame = function (cb) { window.__gameCB = cb; return 0; };
-  // Avance d'une image la logique du jeu (appelé par three.js à chaque frame casque)
-  window.__tickGame = function (nowMs) {
-    const cb = window.__gameCB;
-    if (cb) { window.__gameCB = null; cb(nowMs); }
-  };
-</script>
-
-<!-- 3) Le jeu, inchangé -->
+<!-- 2) Le jeu, inchangé (il pilote sa propre boucle via requestAnimationFrame) -->
 <script src="game.js"></script>
 
-<!-- 4) Init : canvas à résolution fixe + démarrage direct d'un niveau -->
+<!-- 3) Init : canvas à résolution fixe + démarrage direct d'un niveau -->
 <script>
-  // game.js a déjà lancé sa boucle (capturée par le shim, en pause tant que three.js ne tick pas).
   // On fige le canvas à la résolution native du monde (1280×720) pour une texture nette.
   window.removeEventListener('resize', resize); // neutralise le redimensionnement fenêtre
   canvas.width = 1280;
@@ -143,10 +125,20 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // --- Boucle : on avance le jeu, on rafraîchit la texture, on rend en stéréo ---
+  // --- Pilotage de la boucle du jeu ---
+  // Hors VR (desktop) : game.js pilote sa propre boucle via window.requestAnimationFrame → on ne touche à rien.
+  // En VR : le requestAnimationFrame de la fenêtre est GELÉ pendant la session immersive, donc la boucle
+  //         de game.js s'arrête. On l'avance alors nous-mêmes à chaque frame casque via window.loop(time),
+  //         et on neutralise son auto-planification (sinon double exécution à la sortie de VR).
+  let presenting = false;
+  const realRAF = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = function (cb) { return presenting ? 0 : realRAF(cb); };
+  renderer.xr.addEventListener('sessionstart', () => { presenting = true; });
+  renderer.xr.addEventListener('sessionend', () => { presenting = false; if (typeof window.loop === 'function') realRAF(window.loop); });
+
   renderer.setAnimationLoop((time) => {
-    window.__tickGame(time);   // fait tourner game.js d'une image (dans le canvas 2D)
-    tex.needsUpdate = true;    // repousse le canvas vers le GPU
+    if (presenting && typeof window.loop === 'function') window.loop(time); // avance le jeu en VR
+    tex.needsUpdate = true;   // repousse le canvas (2D) vers le GPU
     renderer.render(scene, camera);
   });
 </script>

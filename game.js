@@ -104,7 +104,7 @@ const isBlowing = () => keys['Space'] || mouse.down || btns.blow.id !== null;
 const images = {};
 const ASSET_V = 27; // bump pour forcer le rechargement des images (cache navigateur)
 const _canBust = location.protocol === 'http:' || location.protocol === 'https:'; // pas en file:// (casse le chargement)
-function loadImage(src) { const im = new Image(); im.src = (_canBust && src.indexOf('?') < 0) ? src + '?v=' + ASSET_V : src; images[src] = im; return im; }
+function loadImage(src) { if (!src) return null; const im = new Image(); im.src = (_canBust && src.indexOf('?') < 0) ? src + '?v=' + ASSET_V : src; images[src] = im; return im; }
 const imgReady = src => { const im = images[src]; return im && im.complete && im.naturalWidth; };
 
 // Sprites du personnage et de la bulle (PNG transparents)
