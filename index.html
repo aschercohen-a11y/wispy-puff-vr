@@ -437,6 +437,37 @@
     }
   });
 
+  // helper : poser un modèle importé avec sa base sur l'herbe (y=0)
+  function groundOffset(obj) { return -new THREE.Box3().setFromObject(obj).min.y; }
+
+  // --- Arbres low-poly (Poly Pizza) plantés ---
+  new GLTFLoader().load('models/pp_tree.glb', function (gltf) {
+    const base = gltf.scene;
+    const off = groundOffset(base);                 // hauteur à remonter pour poser la base au sol
+    const spots = [
+      { x: -6, z: 2, s: 2.4 }, { x: 5, z: 5, s: 2.0 }, { x: -3, z: 6.5, s: 2.6 },
+      { x: 7, z: -3, s: 2.2 }, { x: 2, z: 7.5, s: 1.9 }, { x: -8, z: -3.5, s: 2.3 }
+    ];
+    for (let i = 0; i < spots.length; i++) {
+      const t = base.clone(true);
+      t.scale.setScalar(spots[i].s);
+      t.position.set(spots[i].x, off * spots[i].s, spots[i].z);
+      t.rotation.y = i * 1.7;
+      scene.add(t);
+    }
+  });
+
+  // --- Maison storybook (Poly Pizza) ---
+  new GLTFLoader().load('models/pp_cartoonhouse.glb', function (gltf) {
+    const h = gltf.scene;
+    const off = groundOffset(h);                     // AVANT de mettre l'échelle
+    const s = 1.2;
+    h.scale.setScalar(s);
+    h.position.set(-6.5, off * s, -6.5);
+    h.rotation.y = Math.PI * 0.25;                   // orientée vers le centre du jardin
+    scene.add(h);
+  });
+
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
