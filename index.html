@@ -616,6 +616,40 @@
   }
   addEventListener('keydown', (e) => { if (e.code === 'KeyG') plant(); });  // PC : G = planter
 
+  // ============================================================
+  //  PAPILLONS 3D (ailes qui battent, vol aléatoire) + traînée de bulle
+  // ============================================================
+  const butterflies = [];
+  function makeButterfly() {
+    const cols = [0xff6bb5, 0xffd23f, 0x9b5cff, 0x5cc8ff, 0xff7a5c, 0xff4fd0];
+    const c = cols[Math.floor(Math.random() * cols.length)];
+    const g = new THREE.Group();
+    const wingMat = new THREE.MeshStandardMaterial({ color: c, side: THREE.DoubleSide, roughness: 0.5, emissive: c, emissiveIntensity: 0.25 });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.02, 0.14, 3, 6), new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 }));
+    body.rotation.x = Math.PI / 2; g.add(body);   // corps le long de +Z
+    function wing(sign) {
+      const pivot = new THREE.Group();
+      const m = new THREE.Mesh(new THREE.CircleGeometry(0.14, 12), wingMat);
+      m.rotation.x = -Math.PI / 2; m.scale.set(1, 1, 1.5); m.position.x = sign * 0.14;
+      pivot.add(m); g.add(pivot); return pivot;
+    }
+    g.userData = {
+      lw: wing(1), rw: wing(-1),
+      cx: (Math.random() - 0.5) * 18, cz: (Math.random() - 0.5) * 18,
+      r: 1.5 + Math.random() * 4, baseY: 1 + Math.random() * 2.5,
+      sp: 0.3 + Math.random() * 0.5, ph: Math.random() * 6.28, px: 0, pz: 0
+    };
+    return g;
+  }
+  for (let i = 0; i < 8; i++) { const b = makeButterfly(); butterflies.push(b); scene.add(b); }
+
+  const trail = []; let trailIdx = 0, trailT = 0;
+  for (let i = 0; i < 12; i++) {
+    const tm = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0, depthWrite: false }));
+    tm.visible = false; scene.add(tm); trail.push(tm);
+  }
+
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
@@ -908,6 +942,13 @@
         1 + Math.sin(time * 0.0023 + 1.7) * w,
         1 + Math.sin(time * 0.0027 + 3.1) * w
       );
+      bubble.material.iridescenceIOR = 1.3 + Math.sin(time * 0.001) * 0.45;   // scintillement irisé animé
+      trailT += dt;
+      if (trailT > 0.045 && bubbleVel.lengthSq() > 0.4) {                     // dépose une trace si elle bouge
+        trailT = 0;
+        const tm = trail[trailIdx]; trailIdx = (trailIdx + 1) % trail.length;
+        tm.position.copy(bubble.position); tm.visible = true; tm.material.opacity = 0.32; tm.scale.setScalar(0.9);
+      }
       const bpr = Math.hypot(bubble.position.x, bubble.position.z);
       if (bpr > GARDEN_R - 1) { bubble.position.x *= (GARDEN_R - 1) / bpr; bubble.position.z *= (GARDEN_R - 1) / bpr; bubbleVel.multiplyScalar(0.4); }
       for (const o of obstacles) { if (bubble.position.distanceToSquared(o.pos) < (o.r + 0.28) * (o.r + 0.28)) { popBubble(); break; } } // touche un OBJET → éclate
@@ -916,6 +957,21 @@
     portal.rotation.z += dt * 0.6;
     portal.scale.setScalar(1 + Math.sin(time * 0.004) * 0.05);
     if (hudFlashUntil && time > hudFlashUntil) { hudFlashUntil = 0; updateHUD(hudBase); }
+
+    // traînée de la bulle : fondu
+    for (const tm of trail) { if (!tm.visible) continue; tm.material.opacity -= dt * 0.7; tm.scale.multiplyScalar(1 - dt * 0.4); if (tm.material.opacity <= 0) tm.visible = false; }
+    // papillons : vol + battement d'ailes
+    const bt = time * 0.001;
+    for (const bf of butterflies) {
+      const u = bf.userData;
+      const nx = u.cx + Math.cos(bt * u.sp + u.ph) * u.r;
+      const nz = u.cz + Math.sin(bt * u.sp * 1.1 + u.ph) * u.r;
+      bf.position.set(nx, u.baseY + Math.sin(bt * 2 + u.ph) * 0.4, nz);
+      bf.rotation.y = Math.atan2(nx - u.px, nz - u.pz);
+      u.px = nx; u.pz = nz;
+      const flap = Math.sin(time * 0.02 + u.ph) * 0.9;
+      u.lw.rotation.z = flap; u.rw.rotation.z = -flap;
+    }
 
     if (GAME_ENABLED) tex.needsUpdate = true;
     renderer.render(scene, camera);
