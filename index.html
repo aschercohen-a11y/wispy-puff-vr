@@ -99,6 +99,11 @@
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 100);
   camera.position.set(0, 1.6, 0); // hauteur des yeux (assis/debout) ; le casque prend le relais en VR
 
+  // « rig joueur » : porte la caméra. On déplace/pivote CE groupe pour se déplacer en VR.
+  const player = new THREE.Group();
+  player.add(camera);
+  scene.add(player);
+
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(devicePixelRatio);
   renderer.setSize(innerWidth, innerHeight);
@@ -240,34 +245,59 @@
   renderer.xr.addEventListener('sessionstart', () => { presenting = true; });
   renderer.xr.addEventListener('sessionend', () => { presenting = false; if (typeof window.loop === 'function') realRAF(window.loop); });
 
-  // --- Lecture des manettes Touch (mapping xr-standard) ---
-  // Stick : axes[2]=X, axes[3]=Y. Gâchette : buttons[0].
-  function readVRInput() {
+  // ============================================================
+  //  ENTRÉES + DEUX MODES
+  //  • PLAY    : stick gauche = fantôme, stick droit = viser, gâchette = souffler
+  //  • EXPLORE : stick gauche = SE DÉPLACER, stick droit = pivoter (par crans)
+  //  Bouton A/B (ou X/Y) = bascule entre les deux modes.
+  // ============================================================
+  let mode = 'play';
+  let prevToggle = false, prevSnap = 0, lastT = 0;
+  const _up = new THREE.Vector3(0, 1, 0), _fwd = new THREE.Vector3(), _rightv = new THREE.Vector3();
+
+  function updateVR(time) {
     const session = renderer.xr.getSession();
     if (!session) return;
-    const DZ_MOVE = 0.18, DZ_AIM = 0.5;
-    let mv = null, aim = null, blow = false;
+    const dt = lastT ? Math.min(0.05, (time - lastT) / 1000) : 0.016; lastT = time;
+
+    let lx = 0, ly = 0, rx = 0, ry = 0, toggle = false, blow = false;
     for (const src of session.inputSources) {
-      const gp = src.gamepad;
-      if (!gp) continue;
-      const a = gp.axes || [];
+      const gp = src.gamepad; if (!gp) continue;
+      const a = gp.axes || [], b = gp.buttons || [];
       const sx = a.length >= 4 ? a[2] : (a[0] || 0);
       const sy = a.length >= 4 ? a[3] : (a[1] || 0);
-      if (gp.buttons && gp.buttons[0] && gp.buttons[0].pressed) blow = true; // gâchette = souffler
-      const mag = Math.hypot(sx, sy);
-      if (src.handedness === 'right') {
-        if (mag > DZ_AIM) aim = { x: sx, y: sy };            // stick droit = viser
-      } else {
-        if (mag > DZ_MOVE) mv = { x: sx, y: sy };            // stick gauche (ou défaut) = déplacer
-      }
+      if (src.handedness === 'right') { rx = sx; ry = sy; } else { lx = sx; ly = sy; }
+      if (b[0] && b[0].pressed) blow = true;                       // gâchette
+      if ((b[4] && b[4].pressed) || (b[5] && b[5].pressed)) toggle = true; // A/B/X/Y
     }
-    if (window.__vrInput) window.__vrInput(mv, aim, blow);
+
+    if (toggle && !prevToggle) mode = (mode === 'play') ? 'explore' : 'play'; // bascule (front montant)
+    prevToggle = toggle;
+
+    if (mode === 'play') {
+      const mv = (Math.hypot(lx, ly) > 0.18) ? { x: lx, y: ly } : null;
+      const aim = (Math.hypot(rx, ry) > 0.5) ? { x: rx, y: ry } : null;
+      if (window.__vrInput) window.__vrInput(mv, aim, blow);
+    } else {
+      if (window.__vrInput) window.__vrInput(null, null, false);  // fantôme à l'arrêt
+      // déplacement relatif à l'orientation de la tête
+      camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+      _rightv.crossVectors(_fwd, _up).normalize();
+      const SPD = 1.7 * dt;
+      if (Math.hypot(lx, ly) > 0.18) {
+        player.position.addScaledVector(_fwd, -ly * SPD);
+        player.position.addScaledVector(_rightv, lx * SPD);
+      }
+      const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;         // pivot par crans (confort)
+      if (snap && !prevSnap) player.rotateY(-snap * Math.PI / 6);
+      prevSnap = snap;
+    }
   }
 
   renderer.setAnimationLoop((time) => {
     if (presenting) {
-      readVRInput();                                          // manettes → entrées du jeu
-      if (typeof window.loop === 'function') window.loop(time); // avance le jeu en VR
+      updateVR(time);
+      if (typeof window.loop === 'function') window.loop(time);   // le jeu tourne dans les deux modes
     }
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
     if (crystal) crystal.rotation.y += 0.012;  // le cristal tourne doucement
