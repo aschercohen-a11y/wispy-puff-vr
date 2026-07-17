@@ -114,6 +114,12 @@
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
+  // Saut : vitesse verticale + gravité (marche en VR, mobile et PC)
+  let velY = 0, grounded = true;
+  const GRAVITY = 18, JUMP_V = 6;
+  function jump() { if (grounded) { velY = JUMP_V; grounded = false; } }
+  addEventListener('keydown', (e) => { if (e.code === 'Space') jump(); }); // PC : espace = sauter
+
   // Détection tactile (téléphone/tablette)
   const MOBILE = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 
@@ -161,6 +167,13 @@
     }, { passive: false });
     const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
     dom.addEventListener('touchend', endLook); dom.addEventListener('touchcancel', endLook);
+
+    // Bouton SAUTER (bas-droite)
+    const jbtn = document.createElement('div');
+    jbtn.textContent = '↑';
+    jbtn.style.cssText = 'position:fixed;right:24px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:40px;color:#fff;user-select:none;';
+    jbtn.addEventListener('touchstart', (e) => { jump(); e.preventDefault(); }, { passive: false });
+    document.body.appendChild(jbtn);
   }
 
   // Écran de jeu 2D — MASQUÉ pour l'instant (mettre GAME_ENABLED = true pour le réafficher)
@@ -425,7 +438,7 @@
       if ((b[4] && b[4].pressed) || (b[5] && b[5].pressed)) toggle = true; // A/B/X/Y
     }
 
-    if (toggle && !prevToggle) mode = (mode === 'play') ? 'explore' : 'play'; // bascule (front montant)
+    if (toggle && !prevToggle) { if (GAME_ENABLED) mode = (mode === 'play') ? 'explore' : 'play'; else jump(); } // A/B : bascule mode (jeu) ou saut (explo)
     prevToggle = toggle;
 
     if (GAME_ENABLED && mode === 'play') {
@@ -472,6 +485,10 @@
     } else if (controls) {
       controls.update();   // preview PC : caméra souris
     }
+    // SAUT / gravité (tous les modes)
+    velY -= GRAVITY * dt;
+    player.position.y += velY * dt;
+    if (player.position.y <= 0) { player.position.y = 0; velY = 0; grounded = true; }
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
     for (const c of crystals) c.rotation.y += 0.006;   // les cristaux tournent doucement
     if (GAME_ENABLED) tex.needsUpdate = true;
