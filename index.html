@@ -495,12 +495,12 @@
   new GLTFLoader().load('models/pp_cartoonhouse.glb', function (gltf) {
     const h = gltf.scene;
     const off = groundOffset(h);                     // AVANT de mettre l'échelle
-    const s = 1.2;
+    const s = 1.8;                                    // maison plus grande (~6,3 m, porte bien plus haute que le joueur)
     h.scale.setScalar(s);
-    h.position.set(-6.5, off * s, -6.5);
+    h.position.set(-7, off * s, -7);
     h.rotation.y = Math.PI * 0.25;                   // orientée vers le centre du jardin
     scene.add(h);
-    obstacles.push({ pos: new THREE.Vector3(-6.5, 1.6, -6.5), r: 2.6 });   // la maison fait éclater la bulle
+    obstacles.push({ pos: new THREE.Vector3(-7, 1.4, -7), r: 3.6 });   // la maison fait éclater la bulle
   });
 
   // ============================================================
