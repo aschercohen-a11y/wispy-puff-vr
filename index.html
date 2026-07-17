@@ -495,12 +495,12 @@
   new GLTFLoader().load('models/pp_cartoonhouse.glb', function (gltf) {
     const h = gltf.scene;
     const off = groundOffset(h);                     // AVANT de mettre l'échelle
-    const s = 1.8;                                    // maison plus grande (~6,3 m, porte bien plus haute que le joueur)
+    const s = 2.2;                                    // encore + grande pour que le PORCHE/la porte dégagent ta tête
     h.scale.setScalar(s);
-    h.position.set(-7, off * s, -7);
+    h.position.set(-6, off * s, -6);
     h.rotation.y = Math.PI * 0.25;                   // orientée vers le centre du jardin
     scene.add(h);
-    obstacles.push({ pos: new THREE.Vector3(-7, 1.4, -7), r: 3.6 });   // la maison fait éclater la bulle
+    obstacles.push({ pos: new THREE.Vector3(-6, 1.4, -6), r: 4.2 });   // la maison fait éclater la bulle
   });
 
   // ============================================================
@@ -901,6 +901,13 @@
       bubbleVel.multiplyScalar(0.94);                     // traînée (s'arrête doucement quand tu ne souffles plus)
       bubble.position.addScaledVector(bubbleVel, dt);
       bubble.position.y = HOVER_Y;                        // verrouillée à hauteur des yeux
+      // GONDOLEMENT façon bulle de savon : les axes ondulent (déphasés) → elle se déforme du petit au grand
+      const w = 0.10;
+      bubble.scale.set(
+        1 + Math.sin(time * 0.0031) * w,
+        1 + Math.sin(time * 0.0023 + 1.7) * w,
+        1 + Math.sin(time * 0.0027 + 3.1) * w
+      );
       const bpr = Math.hypot(bubble.position.x, bubble.position.z);
       if (bpr > GARDEN_R - 1) { bubble.position.x *= (GARDEN_R - 1) / bpr; bubble.position.z *= (GARDEN_R - 1) / bpr; bubbleVel.multiplyScalar(0.4); }
       for (const o of obstacles) { if (bubble.position.distanceToSquared(o.pos) < (o.r + 0.28) * (o.r + 0.28)) { popBubble(); break; } } // touche un OBJET → éclate
