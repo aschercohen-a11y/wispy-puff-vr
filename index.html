@@ -325,6 +325,23 @@
     }
   });
 
+  // --- Champignons lumineux (models/mushroom.glb) plantés sur l'herbe ---
+  new GLTFLoader().load('models/mushroom.glb', function (gltf) {
+    const base = gltf.scene;
+    const spots = [                                   // (x,z) + taille ; base posée sur l'herbe (y=0)
+      { x: -1.5, z: -3,   s: 0.55 }, { x: 2,   z: -1.5, s: 0.45 },
+      { x: -4.5, z: -1,   s: 0.50 }, { x: 3.5, z: 3.5,  s: 0.60 },
+      { x: -2.5, z: 4,    s: 0.42 }, { x: 0.5, z: 2.8,  s: 0.50 }, { x: 5.5, z: 1, s: 0.48 }
+    ];
+    for (let i = 0; i < spots.length; i++) {
+      const m = base.clone(true);                     // on garde les matériaux Blender (chapeau glow, pied crème)
+      m.scale.setScalar(spots[i].s);
+      m.position.set(spots[i].x, 0, spots[i].z);
+      m.rotation.y = i * 0.9;
+      scene.add(m);
+    }
+  });
+
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
