@@ -120,6 +120,11 @@
   function jump() { if (grounded) { velY = JUMP_V; grounded = false; } }
   addEventListener('keydown', (e) => { if (e.code === 'Space') jump(); }); // PC : espace = sauter
 
+  // Souffle (bulle) : sources d'entrée (VR gâchette / mobile bouton / PC touche F)
+  let vrTrigger = false, mobileBlow = false, pcBlow = false;
+  addEventListener('keydown', (e) => { if (e.code === 'KeyF') pcBlow = true; });
+  addEventListener('keyup', (e) => { if (e.code === 'KeyF') pcBlow = false; });
+
   // Détection tactile (téléphone/tablette)
   const MOBILE = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 
@@ -174,6 +179,15 @@
     jbtn.style.cssText = 'position:fixed;right:24px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:40px;color:#fff;user-select:none;';
     jbtn.addEventListener('touchstart', (e) => { jump(); e.preventDefault(); }, { passive: false });
     document.body.appendChild(jbtn);
+
+    // Bouton SOUFFLER (à gauche du saut)
+    const bbtn = document.createElement('div');
+    bbtn.textContent = '💨';
+    bbtn.style.cssText = 'position:fixed;right:120px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(190,240,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:34px;user-select:none;';
+    bbtn.addEventListener('touchstart', (e) => { mobileBlow = true; e.preventDefault(); }, { passive: false });
+    bbtn.addEventListener('touchend', () => { mobileBlow = false; });
+    bbtn.addEventListener('touchcancel', () => { mobileBlow = false; });
+    document.body.appendChild(bbtn);
   }
 
   // Écran de jeu 2D — MASQUÉ pour l'instant (mettre GAME_ENABLED = true pour le réafficher)
@@ -423,7 +437,8 @@
       crystals.push(c);
     }
     totalCrystals = crystals.length;
-    updateHUD('Cristaux 0 / ' + totalCrystals);
+    hudBase = 'Cristaux 0 / ' + totalCrystals;
+    if (!hudFlashUntil) updateHUD(hudBase);
   });
 
   // --- Champignons lumineux (models/mushroom.glb) plantés sur l'herbe ---
@@ -474,6 +489,43 @@
     scene.add(h);
   });
 
+  // ============================================================
+  //  JEU étape 2 : la BULLE irisée à souffler jusqu'au PORTAIL
+  // ============================================================
+  const BUBBLE_START = new THREE.Vector3(0, 1.4, -1.5);
+  const bubbleVel = new THREE.Vector3();
+  const _head = new THREE.Vector3(), _look = new THREE.Vector3(), _toB = new THREE.Vector3();
+  const bubble = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 32, 24),
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0, metalness: 0, transparent: true, opacity: 0.5, iridescence: 1, iridescenceIOR: 1.3, clearcoat: 1, transmission: 0 })
+  );
+  bubble.position.copy(BUBBLE_START);
+  scene.add(bubble);
+
+  const PORTAL_POS = new THREE.Vector3(6, 1.6, 6);
+  const portal = new THREE.Mesh(
+    new THREE.TorusGeometry(0.9, 0.14, 16, 40),
+    new THREE.MeshStandardMaterial({ color: 0x3fe0d0, emissive: 0x36d8c8, emissiveIntensity: 1.6, roughness: 0.3 })
+  );
+  portal.position.copy(PORTAL_POS);
+  scene.add(portal);
+  {
+    const lc = document.createElement('canvas'); lc.width = 256; lc.height = 64;
+    const lx = lc.getContext('2d'); lx.fillStyle = '#fff'; lx.font = 'bold 42px Trebuchet MS';
+    lx.textAlign = 'center'; lx.textBaseline = 'middle'; lx.fillText('Portail', 128, 34);
+    const lbl = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(lc), transparent: true, depthTest: false }));
+    lbl.scale.set(1.5, 0.375, 1); lbl.position.set(PORTAL_POS.x, PORTAL_POS.y + 1.3, PORTAL_POS.z);
+    lbl.renderOrder = 998; scene.add(lbl);
+  }
+
+  // Cône de souffle (retour visuel), attaché à la caméra, visible quand on souffle
+  const blowCone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.4, 1.3, 18, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xbfefff, transparent: true, opacity: 0.15, depthWrite: false, side: THREE.DoubleSide })
+  );
+  blowCone.rotation.x = -Math.PI / 2; blowCone.position.set(0, -0.05, -0.95); blowCone.visible = false;
+  camera.add(blowCone);
+
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
@@ -505,7 +557,8 @@
     hudCtx.fillText(msg, 256, 72);
     hudTex.needsUpdate = true;
   }
-  updateHUD('Cristaux 0 / …');
+  let hudBase = 'Cristaux 0 / …', hudFlashUntil = 0;
+  updateHUD(hudBase);
 
   // Son de ramassage (synthétisé, aucun fichier)
   let actx = null;
@@ -519,6 +572,19 @@
       g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
       o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.32);
+    } catch (e) {}
+  }
+  function chime() {   // petit arpège de réussite (portail)
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      [660, 880, 1320].forEach((fr, i) => {
+        const t = actx.currentTime + i * 0.09, o = actx.createOscillator(), g = actx.createGain();
+        o.type = 'sine'; o.frequency.setValueAtTime(fr, t);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+        o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.3);
+      });
     } catch (e) {}
   }
   addEventListener('touchstart', () => { if (actx && actx.state === 'suspended') actx.resume(); });
@@ -563,6 +629,7 @@
 
     if (toggle && !prevToggle) { if (GAME_ENABLED) mode = (mode === 'play') ? 'explore' : 'play'; else jump(); } // A/B : bascule mode (jeu) ou saut (explo)
     prevToggle = toggle;
+    vrTrigger = blow;                                          // gâchette = souffler
 
     if (GAME_ENABLED && mode === 'play') {
       const mv = (Math.hypot(lx, ly) > 0.18) ? { x: lx, y: ly } : null;
@@ -630,9 +697,34 @@
       }
       if (_chest.distanceTo(c.position) < 1.4) {          // ramassé !
         c.userData.collected = true; ding(); collected++;
-        updateHUD(collected >= totalCrystals ? 'Bravo ! Tous les cristaux !' : ('Cristaux ' + collected + ' / ' + totalCrystals));
+        hudBase = (collected >= totalCrystals) ? 'Bravo ! Tous les cristaux !' : ('Cristaux ' + collected + ' / ' + totalCrystals);
+        if (!hudFlashUntil) updateHUD(hudBase);
       }
     }
+    // BULLE : souffle (pousse dans la direction du regard si la bulle est devant) + dérive
+    const blowing = vrTrigger || mobileBlow || pcBlow;
+    blowCone.visible = blowing;
+    if (blowing) {
+      camera.getWorldPosition(_head); camera.getWorldDirection(_look);
+      _toB.copy(bubble.position).sub(_head);
+      const dist = _toB.length();
+      if (dist < 4.5 && dist > 0.05) {
+        _toB.normalize();
+        if (_toB.dot(_look) > 0.55) bubbleVel.addScaledVector(_look, (1 - dist / 4.5) * 6.0 * dt);
+      }
+    }
+    bubbleVel.multiplyScalar(0.985);                     // traînée
+    bubble.position.addScaledVector(bubbleVel, dt);
+    if (bubble.position.y < 0.3) { bubble.position.y = 0.3; bubbleVel.y = Math.abs(bubbleVel.y) * 0.4; }
+    const bpr = Math.hypot(bubble.position.x, bubble.position.z);
+    if (bpr > GARDEN_R - 1) { bubble.position.x *= (GARDEN_R - 1) / bpr; bubble.position.z *= (GARDEN_R - 1) / bpr; bubbleVel.multiplyScalar(0.4); }
+    portal.rotation.z += dt * 0.6;
+    if (bubble.position.distanceTo(PORTAL_POS) < 1.0) {  // bulle au portail = réussi !
+      chime(); updateHUD('Bulle au portail ! ✨'); hudFlashUntil = time + 2200;
+      bubble.position.copy(BUBBLE_START); bubbleVel.set(0, 0, 0);
+    }
+    if (hudFlashUntil && time > hudFlashUntil) { hudFlashUntil = 0; updateHUD(hudBase); }
+
     if (GAME_ENABLED) tex.needsUpdate = true;
     renderer.render(scene, camera);
   });
