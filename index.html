@@ -645,6 +645,41 @@
   addEventListener('touchstart', () => { if (actx && actx.state === 'suspended') actx.resume(); });
   addEventListener('click', () => { if (actx && actx.state === 'suspended') actx.resume(); });
 
+  // --- MICRO : souffler pour de vrai (optionnel) ---
+  let micReady = false, micLevel = 0, micBlow = false, analyser = null, micData = null;
+  const MIC_THRESHOLD = 0.22;
+  const micTxt = document.createElement('div');
+  micTxt.style.cssText = 'position:fixed;top:76px;left:50%;transform:translateX(-50%);z-index:40;color:#cff;font-size:13px;text-shadow:0 1px 3px #000;';
+  const micMeter = document.createElement('div');
+  micMeter.style.cssText = 'position:fixed;top:54px;left:50%;transform:translateX(-50%);z-index:40;width:220px;height:14px;border-radius:8px;background:rgba(255,255,255,.15);overflow:hidden;display:none;';
+  const micFill = document.createElement('div');
+  micFill.style.cssText = 'height:100%;width:0%;background:linear-gradient(90deg,#5cf,#3fe0d0);transition:width .05s;';
+  micMeter.appendChild(micFill);
+  const micBtn = document.createElement('button');
+  micBtn.textContent = '🎤 Activer le souffle (micro)';
+  micBtn.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:40;padding:10px 18px;border-radius:22px;border:2px solid #7fd;background:rgba(20,30,60,.85);color:#cff;font-size:15px;cursor:pointer;';
+  function micStatus(s) { micTxt.textContent = s; }
+  function enableMic() {
+    if (micReady) { micStatus('🎤 Micro déjà actif'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micStatus('🎤 Micro indisponible'); return; }
+    micStatus('🎤 Autorisation…');
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .then(function (stream) {
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+        if (actx.state === 'suspended') actx.resume();
+        const src = actx.createMediaStreamSource(stream);
+        analyser = actx.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.4;
+        micData = new Uint8Array(analyser.frequencyBinCount);
+        src.connect(analyser); micReady = true;
+        micMeter.style.display = 'block'; micBtn.style.display = 'none';
+        micStatus('🎤 Micro ACTIF — souffle "ffff" vers la bulle !');
+      })
+      .catch(function () { micStatus('🎤 Micro refusé — autorise-le puis recharge'); });
+  }
+  micBtn.addEventListener('click', enableMic);
+  micBtn.addEventListener('touchstart', function (e) { enableMic(); e.preventDefault(); }, { passive: false });
+  document.body.appendChild(micBtn); document.body.appendChild(micMeter); document.body.appendChild(micTxt);
+
   // --- Pilotage de la boucle du jeu ---
   // Hors VR (desktop) : game.js pilote sa propre boucle via window.requestAnimationFrame → on ne touche à rien.
   // En VR : le requestAnimationFrame de la fenêtre est GELÉ pendant la session immersive, donc la boucle
@@ -771,8 +806,17 @@
       }
     }
 
-    // BULLE : souffle (pousse FORT dans la direction du regard si la bulle est devant) + dérive
-    const blowing = vrTrigger || mobileBlow || pcBlow;
+    // MICRO : mesure le niveau + détecte le souffle
+    if (micReady && analyser) {
+      analyser.getByteFrequencyData(micData);
+      let sum = 0; const n = Math.min(48, micData.length);
+      for (let i = 2; i < n; i++) sum += micData[i];
+      micLevel = sum / ((n - 2) * 255);
+      micBlow = micLevel > MIC_THRESHOLD;
+      micFill.style.width = Math.min(100, micLevel * 180) + '%';
+    }
+    // BULLE : souffle (gâchette / bouton / touche F / MICRO) + dérive
+    const blowing = vrTrigger || mobileBlow || pcBlow || micBlow;
     blowCone.visible = blowing;
     if (blowing) {
       camera.getWorldPosition(_head); camera.getWorldDirection(_look);
