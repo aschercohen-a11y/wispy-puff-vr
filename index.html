@@ -114,14 +114,54 @@
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  // Caméra SOURIS pour la PREVIEW sur PC (clic-glisser = tourner, molette = zoom).
-  // Désactivée en VR (le casque pilote la vue).
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 1.0, -2);
-  controls.enableDamping = true;
-  controls.maxPolarAngle = Math.PI * 0.49; // ne pas passer sous le sol
-  controls.minDistance = 0.5; controls.maxDistance = 22;
-  controls.update();
+  // Détection tactile (téléphone/tablette)
+  const MOBILE = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+  // État des contrôles mobiles (marche + regard)
+  let controls = null;
+  let joyX = 0, joyY = 0, mYaw = 0, mPitch = 0, lookId = null, lastLX = 0, lastLY = 0;
+
+  if (!MOBILE) {
+    // PC : caméra SOURIS (clic-glisser = tourner, molette = zoom)
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 1.0, -2);
+    controls.enableDamping = true;
+    controls.maxPolarAngle = Math.PI * 0.49;
+    controls.minDistance = 0.5; controls.maxDistance = 22;
+    controls.update();
+  } else {
+    // TÉLÉPHONE : joystick (marcher) + glisser (regarder)
+    const base = document.createElement('div');
+    base.style.cssText = 'position:fixed;left:24px;bottom:70px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.4);z-index:30;touch-action:none;';
+    const knob = document.createElement('div');
+    knob.style.cssText = 'position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.6);';
+    base.appendChild(knob); document.body.appendChild(base);
+    const R = 45; let jid = null;
+    function setKnob(dx, dy) {
+      const d = Math.hypot(dx, dy); if (d > R) { dx = dx / d * R; dy = dy / d * R; }
+      knob.style.left = (35 + dx) + 'px'; knob.style.top = (35 + dy) + 'px';
+      joyX = dx / R; joyY = dy / R;
+    }
+    function joyFrom(t) { const r = base.getBoundingClientRect(); setKnob(t.clientX - r.left - 60, t.clientY - r.top - 60); }
+    base.addEventListener('touchstart', (e) => { const t = e.changedTouches[0]; jid = t.identifier; joyFrom(t); e.preventDefault(); }, { passive: false });
+    base.addEventListener('touchmove', (e) => { for (const t of e.changedTouches) if (t.identifier === jid) joyFrom(t); e.preventDefault(); }, { passive: false });
+    const endJoy = (e) => { for (const t of e.changedTouches) if (t.identifier === jid) { jid = null; joyX = 0; joyY = 0; knob.style.left = '35px'; knob.style.top = '35px'; } };
+    base.addEventListener('touchend', endJoy); base.addEventListener('touchcancel', endJoy);
+
+    const dom = renderer.domElement;
+    dom.addEventListener('touchstart', (e) => { const t = e.changedTouches[0]; lookId = t.identifier; lastLX = t.clientX; lastLY = t.clientY; }, { passive: false });
+    dom.addEventListener('touchmove', (e) => {
+      for (const t of e.changedTouches) if (t.identifier === lookId) {
+        mYaw -= (t.clientX - lastLX) * 0.005; mPitch -= (t.clientY - lastLY) * 0.005;
+        lastLX = t.clientX; lastLY = t.clientY;
+        mPitch = Math.max(-1.2, Math.min(1.2, mPitch));
+        player.rotation.y = mYaw; camera.rotation.x = mPitch;
+      }
+      e.preventDefault();
+    }, { passive: false });
+    const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
+    dom.addEventListener('touchend', endLook); dom.addEventListener('touchcancel', endLook);
+  }
 
   // Écran de jeu 2D — MASQUÉ pour l'instant (mettre GAME_ENABLED = true pour le réafficher)
   const GAME_ENABLED = false;
@@ -356,8 +396,8 @@
   let presenting = false;
   const realRAF = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = function (cb) { return presenting ? 0 : realRAF(cb); };
-  renderer.xr.addEventListener('sessionstart', () => { presenting = true; controls.enabled = false; });
-  renderer.xr.addEventListener('sessionend', () => { presenting = false; controls.enabled = true; if (typeof window.loop === 'function') realRAF(window.loop); });
+  renderer.xr.addEventListener('sessionstart', () => { presenting = true; if (controls) controls.enabled = false; });
+  renderer.xr.addEventListener('sessionend', () => { presenting = false; if (controls) controls.enabled = true; if (typeof window.loop === 'function') realRAF(window.loop); });
 
   // ============================================================
   //  ENTRÉES + DEUX MODES
@@ -411,11 +451,25 @@
     }
   }
 
+  let prevFrameT = 0;
   renderer.setAnimationLoop((time) => {
+    const dt = prevFrameT ? Math.min(0.05, (time - prevFrameT) / 1000) : 0.016; prevFrameT = time;
     if (presenting) {
       updateVR(time);
       if (GAME_ENABLED && typeof window.loop === 'function') window.loop(time);
-    } else {
+    } else if (MOBILE) {
+      // TÉLÉPHONE : marcher avec le joystick (relatif à la direction du regard)
+      if (Math.hypot(joyX, joyY) > 0.05) {
+        const yaw = player.rotation.y;
+        _fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+        _rightv.set(Math.cos(yaw), 0, -Math.sin(yaw));
+        const SPD = 1.8 * dt;
+        player.position.addScaledVector(_fwd, -joyY * SPD);
+        player.position.addScaledVector(_rightv, joyX * SPD);
+        const pr = Math.hypot(player.position.x, player.position.z);
+        if (pr > BOUND_R) { player.position.x *= BOUND_R / pr; player.position.z *= BOUND_R / pr; }
+      }
+    } else if (controls) {
       controls.update();   // preview PC : caméra souris
     }
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
