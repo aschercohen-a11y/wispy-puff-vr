@@ -291,6 +291,9 @@
     scene.add(grass);
   }
 
+  // Obstacles qui font ÉCLATER la bulle (rempli au fur et à mesure : buissons, arbres, maison)
+  const obstacles = [];
+
   // Limite : anneau de buissons VISIBLE + garde-fou en CODE (BOUND_R, appliqué dans updateVR)
   const BOUND_R = GARDEN_R - 1.5;
   const bushGeo = new THREE.IcosahedronGeometry(0.6, 1);
@@ -301,6 +304,7 @@
     b.position.set(Math.cos(a) * GARDEN_R * 0.98, 0.35, Math.sin(a) * GARDEN_R * 0.98);
     b.scale.setScalar(0.7 + Math.random() * 0.9);
     scene.add(b);
+    obstacles.push({ pos: b.position.clone().setY(0.55), r: 0.55 * b.scale.x });
   }
 
   // ============================================================
@@ -483,6 +487,7 @@
       t.position.set(spots[i].x, off * spots[i].s, spots[i].z);
       t.rotation.y = i * 1.7;
       scene.add(t);
+      obstacles.push({ pos: new THREE.Vector3(spots[i].x, 1.5, spots[i].z), r: 0.9 });
     }
   });
 
@@ -495,6 +500,7 @@
     h.position.set(-6.5, off * s, -6.5);
     h.rotation.y = Math.PI * 0.25;                   // orientée vers le centre du jardin
     scene.add(h);
+    obstacles.push({ pos: new THREE.Vector3(-6.5, 1.6, -6.5), r: 2.6 });   // la maison fait éclater la bulle
   });
 
   // ============================================================
@@ -538,6 +544,34 @@
   );
   blowCone.rotation.x = -Math.PI / 2; blowCone.position.set(0, -0.05, -0.95); blowCone.visible = false;
   camera.add(blowCone);
+
+  // Éclatement de la bulle : gouttelettes irisées + son "pop"
+  const drops = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6),
+      new THREE.MeshPhysicalMaterial({ color: 0xcfefff, roughness: 0, transparent: true, opacity: 0.7, iridescence: 1 }));
+    d.visible = false; d.userData.vel = new THREE.Vector3(); scene.add(d); drops.push(d);
+  }
+  let bubblePopT = -1;
+  function popSound() {
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(720, t); o.frequency.exponentialRampToValueAtTime(120, t + 0.12);
+      g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.16);
+    } catch (e) {}
+  }
+  function popBubble() {
+    if (bubblePopT >= 0 || bubbleWarpT >= 0) return;
+    bubblePopT = 0; popSound();
+    for (const d of drops) {
+      d.position.copy(bubble.position);
+      d.userData.vel.set((Math.random() - 0.5) * 3, Math.random() * 2.5 + 1.5, (Math.random() - 0.5) * 3);
+      d.visible = true; d.material.opacity = 0.7;
+    }
+  }
 
   // ============================================================
   //  JEU étape 3 : JARDINAGE — planter (1 graine = 1 cristal ramassé)
@@ -820,25 +854,28 @@
       micBlow = micLevel > MIC_THRESHOLD;
       micFill.style.width = Math.min(100, micLevel * 180) + '%';
     }
-    // BULLE : souffle (gâchette / bouton / touche F / MICRO) + dérive + transport par le portail
+    // BULLE : souffle + dérive + ÉCLATE au sol/objet + transport par le portail
     const blowing = vrTrigger || mobileBlow || pcBlow || micBlow;
-    blowCone.visible = blowing && bubbleWarpT < 0;
-    if (bubbleWarpT < 0) {                                // pilotage normal
-      if (blowing) {
-        camera.getWorldPosition(_head); camera.getWorldDirection(_look);
-        _toB.copy(bubble.position).sub(_head);
-        const dist = _toB.length();
-        if (dist < 6 && dist > 0.05) { _toB.normalize(); if (_toB.dot(_look) > 0.3) bubbleVel.addScaledVector(_look, 10 * dt); }
+    blowCone.visible = blowing && bubbleWarpT < 0 && bubblePopT < 0;
+    if (bubblePopT >= 0) {                                // === ÉCLATEMENT ===
+      bubblePopT += dt;
+      const k = Math.min(1, bubblePopT / 0.22);
+      bubble.scale.setScalar(1 + k * 0.9);               // gonfle
+      bubble.material.opacity = 0.5 * (1 - k);           // s'efface
+      if (k >= 1) bubble.visible = false;
+      for (const d of drops) {                            // gouttelettes qui retombent
+        if (!d.visible) continue;
+        d.userData.vel.y -= 9 * dt;
+        d.position.addScaledVector(d.userData.vel, dt);
+        d.material.opacity = Math.max(0, 0.7 - bubblePopT);
+        if (d.position.y < 0.05 || bubblePopT > 0.9) d.visible = false;
       }
-      bubbleVel.y -= 1.6 * dt;                            // gravité douce
-      bubbleVel.multiplyScalar(0.96);                     // traînée
-      bubble.position.addScaledVector(bubbleVel, dt);
-      if (bubble.position.y < 0.3) { bubble.position.y = 0.3; bubbleVel.y = Math.abs(bubbleVel.y) * 0.3; }
-      if (bubble.position.y > 3.2) { bubble.position.y = 3.2; if (bubbleVel.y > 0) bubbleVel.y = 0; }
-      const bpr = Math.hypot(bubble.position.x, bubble.position.z);
-      if (bpr > GARDEN_R - 1) { bubble.position.x *= (GARDEN_R - 1) / bpr; bubble.position.z *= (GARDEN_R - 1) / bpr; bubbleVel.multiplyScalar(0.4); }
-      if (bubble.position.distanceTo(PORTAL_POS) < 1.0) bubbleWarpT = 0;   // entre dans le portail !
-    } else {                                              // aspiration dans le portail
+      if (bubblePopT > 1.1) {                             // réapparition
+        bubblePopT = -1;
+        bubble.visible = true; bubble.material.opacity = 0.5; bubble.scale.setScalar(1);
+        bubble.position.copy(BUBBLE_START); bubbleVel.set(0, 0, 0);
+      }
+    } else if (bubbleWarpT >= 0) {                        // === ASPIRATION portail ===
       bubbleWarpT += dt * 2.4;
       bubble.position.lerp(PORTAL_POS, 0.25);
       bubble.scale.setScalar(Math.max(0.05, 1 - bubbleWarpT));
@@ -848,9 +885,25 @@
         movePortal();
         bubble.position.copy(BUBBLE_START); bubbleVel.set(0, 0, 0); bubble.scale.setScalar(1);
       }
+    } else {                                              // === PILOTAGE normal ===
+      if (blowing) {
+        camera.getWorldPosition(_head); camera.getWorldDirection(_look);
+        _toB.copy(bubble.position).sub(_head);
+        const dist = _toB.length();
+        if (dist < 6 && dist > 0.05) { _toB.normalize(); if (_toB.dot(_look) > 0.3) bubbleVel.addScaledVector(_look, 10 * dt); }
+      }
+      bubbleVel.y -= 0.9 * dt;                            // gravité TRÈS douce (le temps de la rattraper)
+      bubbleVel.multiplyScalar(0.96);                     // traînée
+      bubble.position.addScaledVector(bubbleVel, dt);
+      const bpr = Math.hypot(bubble.position.x, bubble.position.z);
+      if (bpr > GARDEN_R - 1) { bubble.position.x *= (GARDEN_R - 1) / bpr; bubble.position.z *= (GARDEN_R - 1) / bpr; bubbleVel.multiplyScalar(0.4); }
+      if (bubble.position.y > 3.2) { bubble.position.y = 3.2; if (bubbleVel.y > 0) bubbleVel.y = 0; }
+      if (bubble.position.y < 0.35) popBubble();          // touche le SOL → éclate !
+      else { for (const o of obstacles) { if (bubble.position.distanceToSquared(o.pos) < (o.r + 0.28) * (o.r + 0.28)) { popBubble(); break; } } } // touche un OBJET
+      if (bubblePopT < 0 && bubble.position.distanceTo(PORTAL_POS) < 1.0) bubbleWarpT = 0;  // entre dans le portail
     }
     portal.rotation.z += dt * 0.6;
-    portal.scale.setScalar(1 + Math.sin(time * 0.004) * 0.05);           // pulsation
+    portal.scale.setScalar(1 + Math.sin(time * 0.004) * 0.05);
     if (hudFlashUntil && time > hudFlashUntil) { hudFlashUntil = 0; updateHUD(hudBase); }
 
     if (GAME_ENABLED) tex.needsUpdate = true;
