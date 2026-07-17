@@ -392,17 +392,20 @@
   new GLTFLoader().load('models/crystal.glb', function (gltf) {
     const base = gltf.scene;
     const tints = [0xff33cc, 0x9b5cff, 0x3fe0d0, 0xff7ad0, 0x66aaff];
-    const spots = [                                  // où planter (x,z) et la taille (s)
-      { x: 0,   z: -2.5, s: 0.5 },
-      { x: -3,  z: -1.5, s: 0.30 }, { x: 3,  z: -3,   s: 0.28 },
-      { x: 4.5, z: 2,    s: 0.34 }, { x: -4, z: 3,    s: 0.26 },
-      { x: 1.5, z: 4.5,  s: 0.30 }, { x: -2, z: -4.5, s: 0.24 }, { x: 5, z: -1, s: 0.30 }
+    const spots = [                                  // (x,z,s) au sol ; +y = FLOTTANT (à attraper en sautant)
+      { x: 0,   z: -2.5, s: 0.42 },
+      { x: -3,  z: -1.5, s: 0.30 }, { x: 3,  z: -3,   s: 0.30 },
+      { x: 4.5, z: 2,    s: 0.32 }, { x: -4, z: 3,    s: 0.28 },
+      { x: 1.5, z: 4.5,  s: 0.30 }, { x: -2, z: -4.5, s: 0.28 }, { x: 6, z: -1, s: 0.30 },
+      { x: 2,  z: 1,  s: 0.34, y: 1.5 }, { x: -5, z: -2, s: 0.34, y: 1.7 },
+      { x: 0,  z: 5,  s: 0.34, y: 1.4 }, { x: -1, z: -6, s: 0.34, y: 1.9 }
     ];
     for (let i = 0; i < spots.length; i++) {
       const c = base.clone(true);
       const s = spots[i].s;
       c.scale.setScalar(s);
-      c.position.set(spots[i].x, s * 1.3, spots[i].z);           // base posée sur l'herbe
+      const y = (spots[i].y != null) ? spots[i].y : s * 1.3;
+      c.position.set(spots[i].x, y, spots[i].z);
       c.rotation.y = i * 1.3;
       const tint = tints[i % tints.length];
       c.traverse(function (o) {
@@ -415,9 +418,12 @@
           o.material.roughness = 0.15; o.material.metalness = 0;
         }
       });
+      c.userData = { collected: false, pop: 0, baseScale: s, floating: spots[i].y != null, baseY: y };
       scene.add(c);
       crystals.push(c);
     }
+    totalCrystals = crystals.length;
+    updateHUD('Cristaux 0 / ' + totalCrystals);
   });
 
   // --- Champignons lumineux (models/mushroom.glb) plantés sur l'herbe ---
@@ -474,6 +480,50 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
+  // ============================================================
+  //  JEU : collecte des cristaux — HUD + son + état
+  // ============================================================
+  let collected = 0, totalCrystals = 0;
+  const _chest = new THREE.Vector3();
+
+  // HUD compteur (attaché à la caméra → visible en VR, mobile et PC)
+  const hudCanvas = document.createElement('canvas'); hudCanvas.width = 512; hudCanvas.height = 140;
+  const hudCtx = hudCanvas.getContext('2d');
+  const hudTex = new THREE.CanvasTexture(hudCanvas);
+  const hud = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.46, 0.126),
+    new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false })
+  );
+  hud.position.set(0, -0.34, -1.05); hud.renderOrder = 999;
+  camera.add(hud);
+  function updateHUD(msg) {
+    hudCtx.clearRect(0, 0, 512, 140);
+    hudCtx.fillStyle = 'rgba(18,18,38,0.55)'; hudCtx.fillRect(0, 0, 512, 140);
+    hudCtx.fillStyle = '#eaf2ff';
+    hudCtx.font = 'bold 60px Trebuchet MS, sans-serif';
+    hudCtx.textAlign = 'center'; hudCtx.textBaseline = 'middle';
+    hudCtx.fillText(msg, 256, 72);
+    hudTex.needsUpdate = true;
+  }
+  updateHUD('Cristaux 0 / …');
+
+  // Son de ramassage (synthétisé, aucun fichier)
+  let actx = null;
+  function ding() {
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(880, t); o.frequency.exponentialRampToValueAtTime(1650, t + 0.12);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.32);
+    } catch (e) {}
+  }
+  addEventListener('touchstart', () => { if (actx && actx.state === 'suspended') actx.resume(); });
+  addEventListener('click', () => { if (actx && actx.state === 'suspended') actx.resume(); });
+
   // --- Pilotage de la boucle du jeu ---
   // Hors VR (desktop) : game.js pilote sa propre boucle via window.requestAnimationFrame → on ne touche à rien.
   // En VR : le requestAnimationFrame de la fenêtre est GELÉ pendant la session immersive, donc la boucle
@@ -482,7 +532,7 @@
   let presenting = false;
   const realRAF = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = function (cb) { return presenting ? 0 : realRAF(cb); };
-  renderer.xr.addEventListener('sessionstart', () => { presenting = true; if (controls) controls.enabled = false; });
+  renderer.xr.addEventListener('sessionstart', () => { presenting = true; if (controls) controls.enabled = false; try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {} });
   renderer.xr.addEventListener('sessionend', () => { presenting = false; if (controls) controls.enabled = true; if (typeof window.loop === 'function') realRAF(window.loop); });
 
   // ============================================================
@@ -564,7 +614,25 @@
     if (player.position.y <= 0) { player.position.y = 0; velY = 0; grounded = true; }
     if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
-    for (const c of crystals) c.rotation.y += 0.006;   // les cristaux tournent doucement
+    // cristaux : rotation + flottement + COLLECTE
+    camera.getWorldPosition(_chest);                    // position réelle de la tête
+    for (const c of crystals) {
+      if (c.userData.done) continue;
+      c.rotation.y += 0.01;
+      if (c.userData.floating && !c.userData.collected)
+        c.position.y = c.userData.baseY + Math.sin(time * 0.002 + c.position.x) * 0.12;
+      if (c.userData.collected) {                        // animation de ramassage (grossit + s'efface)
+        c.userData.pop += dt * 3.2;
+        c.scale.setScalar(c.userData.baseScale * (1 + c.userData.pop));
+        c.traverse(o => { if (o.isMesh && o.material) { o.material.transparent = true; o.material.opacity = Math.max(0, 1 - c.userData.pop); } });
+        if (c.userData.pop >= 1) { c.visible = false; c.userData.done = true; }
+        continue;
+      }
+      if (_chest.distanceTo(c.position) < 1.4) {          // ramassé !
+        c.userData.collected = true; ding(); collected++;
+        updateHUD(collected >= totalCrystals ? 'Bravo ! Tous les cristaux !' : ('Cristaux ' + collected + ' / ' + totalCrystals));
+      }
+    }
     if (GAME_ENABLED) tex.needsUpdate = true;
     renderer.render(scene, camera);
   });
