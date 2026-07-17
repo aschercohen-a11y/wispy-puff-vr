@@ -515,6 +515,18 @@
     obstacles.push({ pos: new THREE.Vector3(-6, 1.4, -6), r: 4.2 });   // la maison fait éclater la bulle
   });
 
+  // --- Maison-carotte (faite dans Blender) ---
+  new GLTFLoader().load('models/carrothouse.glb', function (gltf) {
+    const c = gltf.scene;
+    const off = groundOffset(c);
+    const s = 1.3;
+    c.scale.setScalar(s);
+    c.position.set(7, off * s, 6);
+    c.rotation.y = -Math.PI * 0.3;                   // porte vers le centre
+    scene.add(c);
+    obstacles.push({ pos: new THREE.Vector3(7, 1.4, 6), r: 2.0 });     // fait éclater la bulle
+  });
+
   // ============================================================
   //  JEU étape 2 : la BULLE irisée à souffler jusqu'au PORTAIL
   // ============================================================
