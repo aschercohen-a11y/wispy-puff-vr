@@ -827,9 +827,11 @@
         if (_toB.dot(_look) > 0.3) bubbleVel.addScaledVector(_look, 10 * dt);   // souffle costaud, cône large
       }
     }
+    bubbleVel.y -= 1.6 * dt;                             // gravité DOUCE → la bulle redescend (toujours récupérable)
     bubbleVel.multiplyScalar(0.96);                      // traînée (garde le contrôle)
     bubble.position.addScaledVector(bubbleVel, dt);
-    if (bubble.position.y < 0.3) { bubble.position.y = 0.3; bubbleVel.y = Math.abs(bubbleVel.y) * 0.4; }
+    if (bubble.position.y < 0.3) { bubble.position.y = 0.3; bubbleVel.y = Math.abs(bubbleVel.y) * 0.3; }  // rebond au sol
+    if (bubble.position.y > 3.2) { bubble.position.y = 3.2; if (bubbleVel.y > 0) bubbleVel.y = 0; }        // plafond
     const bpr = Math.hypot(bubble.position.x, bubble.position.z);
     if (bpr > GARDEN_R - 1) { bubble.position.x *= (GARDEN_R - 1) / bpr; bubble.position.z *= (GARDEN_R - 1) / bpr; bubbleVel.multiplyScalar(0.4); }
     portal.rotation.z += dt * 0.6;
