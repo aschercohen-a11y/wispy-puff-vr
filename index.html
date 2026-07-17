@@ -114,11 +114,9 @@
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  // Saut : vitesse verticale + gravité (marche en VR, mobile et PC)
-  let velY = 0, grounded = true;
-  const GRAVITY = 18, JUMP_V = 6;
-  function jump() { if (grounded) { velY = JUMP_V; grounded = false; } }
-  addEventListener('keydown', (e) => { if (e.code === 'Space') jump(); }); // PC : espace = sauter
+  // FANTÔME : vol libre — pas de saut ni de gravité. Vertical mobile via boutons ⬆/⬇.
+  let mobileUp = false, mobileDown = false;
+  function jump() {}   // conservé (bouton A/B) mais sans effet : le fantôme vole
 
   // Souffle (bulle) : sources d'entrée (VR gâchette / mobile bouton / PC touche F)
   let vrTrigger = false, mobileBlow = false, pcBlow = false;
@@ -173,12 +171,17 @@
     const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
     dom.addEventListener('touchend', endLook); dom.addEventListener('touchcancel', endLook);
 
-    // Bouton SAUTER (bas-droite)
-    const jbtn = document.createElement('div');
-    jbtn.textContent = '↑';
-    jbtn.style.cssText = 'position:fixed;right:24px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:40px;color:#fff;user-select:none;';
-    jbtn.addEventListener('touchstart', (e) => { jump(); e.preventDefault(); }, { passive: false });
-    document.body.appendChild(jbtn);
+    // Boutons MONTER (⬆) / DESCENDRE (⬇) — le fantôme vole
+    function flyBtn(label, bottom, onHold) {
+      const el = document.createElement('div'); el.textContent = label;
+      el.style.cssText = 'position:fixed;right:24px;bottom:' + bottom + 'px;width:84px;height:84px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:38px;color:#fff;user-select:none;';
+      el.addEventListener('touchstart', (e) => { onHold(true); e.preventDefault(); }, { passive: false });
+      el.addEventListener('touchend', () => onHold(false));
+      el.addEventListener('touchcancel', () => onHold(false));
+      document.body.appendChild(el);
+    }
+    flyBtn('⬆', 176, (v) => { mobileUp = v; });
+    flyBtn('⬇', 80, (v) => { mobileDown = v; });
 
     // Bouton SOUFFLER (à gauche du saut)
     const bbtn = document.createElement('div');
@@ -803,21 +806,23 @@
       const aim = (Math.hypot(rx, ry) > 0.5) ? { x: rx, y: ry } : null;
       if (window.__vrInput) window.__vrInput(mv, aim, blow);
     } else {
-      // EXPLORATION (ou jeu masqué) : on se déplace
-      if (GAME_ENABLED && window.__vrInput) window.__vrInput(null, null, false); // fantôme à l'arrêt
-      camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
-      _rightv.crossVectors(_fwd, _up).normalize();
-      const SPD = 1.7 * dt;
-      if (Math.hypot(lx, ly) > 0.18) {
-        player.position.addScaledVector(_fwd, -ly * SPD);
-        player.position.addScaledVector(_rightv, lx * SPD);
+      // FANTÔME : VOL LIBRE 6DOF — vole vers le regard (stick gauche) + monter/descendre (stick droit haut/bas)
+      if (GAME_ENABLED && window.__vrInput) window.__vrInput(null, null, false);
+      camera.getWorldDirection(_fwd); _fwd.normalize();           // regard COMPLET (haut/bas inclus)
+      _rightv.set(_fwd.x, 0, _fwd.z);
+      if (_rightv.lengthSq() < 1e-4) _rightv.set(0, 0, -1);
+      _rightv.normalize(); _rightv.crossVectors(_rightv, _up).normalize();   // droite horizontale
+      const SPD = 2.6 * dt;
+      if (Math.hypot(lx, ly) > 0.15) {
+        player.position.addScaledVector(_fwd, -ly * SPD);          // avance = vole vers où tu regardes (monte/descend)
+        player.position.addScaledVector(_rightv, lx * SPD);        // strafe latéral
       }
-      const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;         // pivot par crans (confort)
+      if (Math.abs(ry) > 0.4) player.position.y += -ry * SPD;      // stick DROIT haut/bas = monter / descendre
+      const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;          // stick droit gauche/droite = pivoter
       if (snap && !prevSnap) player.rotateY(-snap * Math.PI / 6);
       prevSnap = snap;
-      // GARDE-FOU : on reste dans le jardin (rayon BOUND_R)
-      const pr = Math.hypot(player.position.x, player.position.z);
-      if (pr > BOUND_R) { player.position.x *= BOUND_R / pr; player.position.z *= BOUND_R / pr; }
+      const pr = Math.hypot(player.position.x, player.position.z); // reste dans le dôme du ciel
+      if (pr > 45) { player.position.x *= 45 / pr; player.position.z *= 45 / pr; }
     }
   }
 
@@ -828,24 +833,24 @@
       updateVR(time);
       if (GAME_ENABLED && typeof window.loop === 'function') window.loop(time);
     } else if (MOBILE) {
-      // TÉLÉPHONE : marcher avec le joystick (relatif à la direction du regard)
+      // TÉLÉPHONE : vol vers le regard (joystick) — ⬆/⬇ pour monter/descendre
       if (Math.hypot(joyX, joyY) > 0.05) {
-        const yaw = player.rotation.y;
-        _fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
-        _rightv.set(Math.cos(yaw), 0, -Math.sin(yaw));
-        const SPD = 1.8 * dt;
+        camera.getWorldDirection(_fwd); _fwd.normalize();          // regard complet (haut/bas inclus)
+        _rightv.set(_fwd.x, 0, _fwd.z);
+        if (_rightv.lengthSq() < 1e-4) _rightv.set(0, 0, -1);
+        _rightv.normalize(); _rightv.crossVectors(_rightv, _up).normalize();
+        const SPD = 2.4 * dt;
         player.position.addScaledVector(_fwd, -joyY * SPD);
         player.position.addScaledVector(_rightv, joyX * SPD);
         const pr = Math.hypot(player.position.x, player.position.z);
-        if (pr > BOUND_R) { player.position.x *= BOUND_R / pr; player.position.z *= BOUND_R / pr; }
+        if (pr > 45) { player.position.x *= 45 / pr; player.position.z *= 45 / pr; }
       }
     } else if (controls) {
       controls.update();   // preview PC : caméra souris
     }
-    // SAUT / gravité (tous les modes)
-    velY -= GRAVITY * dt;
-    player.position.y += velY * dt;
-    if (player.position.y <= 0) { player.position.y = 0; velY = 0; grounded = true; }
+    // FANTÔME : mobile monte/descend (boutons) + reste dans un volume raisonnable (aucune gravité)
+    if (!presenting && MOBILE) { if (mobileUp) player.position.y += 2.6 * dt; if (mobileDown) player.position.y -= 2.6 * dt; }
+    player.position.y = Math.max(0.4, Math.min(40, player.position.y));
     if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
     // cristaux : rotation + flottement + COLLECTE
