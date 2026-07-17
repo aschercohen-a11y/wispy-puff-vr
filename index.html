@@ -113,6 +113,9 @@
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
+  // Écran de jeu 2D — MASQUÉ pour l'instant (mettre GAME_ENABLED = true pour le réafficher)
+  const GAME_ENABLED = false;
+
   // --- Écran flottant texturé par le canvas du jeu ---
   const tex = new THREE.CanvasTexture(gameCanvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -120,7 +123,6 @@
   tex.magFilter = THREE.LinearFilter;
   tex.generateMipmaps = false;
 
-  // --- PLAN D'ACTION (Z avant) : le canvas du jeu, TRANSPARENT (fantôme + bulle + effets) ---
   const screenW = 3.2, screenH = screenW * 720 / 1280; // 16:9
   const ACTION_Z = -2.6, ACTION_Y = 1.55;
   const screen = new THREE.Mesh(
@@ -128,11 +130,49 @@
     new THREE.MeshBasicMaterial({ map: tex, transparent: true })
   );
   screen.position.set(0, ACTION_Y, ACTION_Z);
-  scene.add(screen);
+  if (GAME_ENABLED) scene.add(screen);
 
-  const grid = new THREE.GridHelper(10, 20, 0x2a3a7a, 0x141d40);
-  grid.position.y = 0;
-  scene.add(grid);
+  // ============================================================
+  //  SOL HERBE + LUMIÈRE + LIMITE DU JARDIN
+  // ============================================================
+  // Lumière (jardin de nuit, teinte bleutée)
+  scene.add(new THREE.HemisphereLight(0x93a7ff, 0x1a2a1a, 0.9));
+  const moon = new THREE.DirectionalLight(0xcfe0ff, 0.7);
+  moon.position.set(6, 12, 4); scene.add(moon);
+
+  // Sol : herbe = un grand disque + texture d'herbe procédurale répétée
+  function makeGrassTexture() {
+    const s = 512, c = document.createElement('canvas'); c.width = c.height = s;
+    const x = c.getContext('2d');
+    x.fillStyle = '#2f5d34'; x.fillRect(0, 0, s, s);               // vert de base
+    for (let i = 0; i < 9000; i++) {                              // brins/nuances
+      const g = 60 + (Math.random() * 90 | 0);
+      x.fillStyle = 'rgba(' + (30 + (Math.random()*40|0)) + ',' + g + ',' + (40 + (Math.random()*30|0)) + ',0.5)';
+      x.fillRect(Math.random()*s, Math.random()*s, 1.5, 2 + Math.random()*3);
+    }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(14, 14);
+    return t;
+  }
+  const GARDEN_R = 15;                                            // rayon du jardin
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(GARDEN_R, 64),
+    new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 1, metalness: 0 })
+  );
+  ground.rotation.x = -Math.PI / 2;                              // à plat
+  scene.add(ground);
+
+  // Limite : anneau de buissons VISIBLE + garde-fou en CODE (BOUND_R, appliqué dans updateVR)
+  const BOUND_R = GARDEN_R - 1.5;
+  const bushGeo = new THREE.IcosahedronGeometry(0.6, 1);
+  const bushMat = new THREE.MeshStandardMaterial({ color: 0x2b6b3a, roughness: 1, flatShading: true });
+  for (let i = 0; i < 46; i++) {
+    const a = (i / 46) * Math.PI * 2;
+    const b = new THREE.Mesh(bushGeo, bushMat);
+    b.position.set(Math.cos(a) * GARDEN_R * 0.98, 0.35, Math.sin(a) * GARDEN_R * 0.98);
+    b.scale.setScalar(0.7 + Math.random() * 0.9);
+    scene.add(b);
+  }
 
   // ============================================================
   //  ENVIRONNEMENT ENVELOPPANT : ciel + étoiles + nuages
@@ -204,29 +244,41 @@
   clouds.forEach(placeCloud);
 
   // ============================================================
-  //  NOTRE PREMIER OBJET 3D : le cristal (models/crystal.glb)
-  //  fabriqué dans Blender, flotte devant, tourne doucement.
+  //  DÉCORS « PLANTÉS » : on charge le cristal UNE fois, puis on
+  //  en pose plusieurs sur l'herbe (position + taille + rotation).
+  //  → C'est LA méthode pour planter n'importe quel décor 3D.
   // ============================================================
-  let crystal = null;
+  const crystals = [];
   new GLTFLoader().load('models/crystal.glb', function (gltf) {
-    crystal = gltf.scene;
-    crystal.scale.setScalar(0.32);
-    crystal.position.set(-1.25, 1.55, -1.9);   // devant/gauche, plus proche que l'écran de jeu → bien en 3D
-    crystal.traverse(function (o) {
-      if (o.isMesh && o.material) {
-        o.material.emissive = new THREE.Color(0xff33cc);
-        o.material.emissiveIntensity = 2.2;     // auto-illuminé (glow néon)
-        if ('transmission' in o.material) o.material.transmission = 0; // rendu solide net en VR
-        o.material.roughness = 0.12;
-        o.material.metalness = 0;
-      }
-    });
-    scene.add(crystal);
+    const base = gltf.scene;
+    const tints = [0xff33cc, 0x9b5cff, 0x3fe0d0, 0xff7ad0, 0x66aaff];
+    const spots = [                                  // où planter (x,z) et la taille (s)
+      { x: 0,   z: -2.5, s: 0.5 },
+      { x: -3,  z: -1.5, s: 0.30 }, { x: 3,  z: -3,   s: 0.28 },
+      { x: 4.5, z: 2,    s: 0.34 }, { x: -4, z: 3,    s: 0.26 },
+      { x: 1.5, z: 4.5,  s: 0.30 }, { x: -2, z: -4.5, s: 0.24 }, { x: 5, z: -1, s: 0.30 }
+    ];
+    for (let i = 0; i < spots.length; i++) {
+      const c = base.clone(true);
+      const s = spots[i].s;
+      c.scale.setScalar(s);
+      c.position.set(spots[i].x, s * 1.3, spots[i].z);           // base posée sur l'herbe
+      c.rotation.y = i * 1.3;
+      const tint = tints[i % tints.length];
+      c.traverse(function (o) {
+        if (o.isMesh && o.material) {
+          o.material = o.material.clone();                       // matériau indépendant par cristal
+          o.material.color = new THREE.Color(tint);
+          o.material.emissive = new THREE.Color(tint);
+          o.material.emissiveIntensity = 1.8;
+          if ('transmission' in o.material) o.material.transmission = 0;
+          o.material.roughness = 0.15; o.material.metalness = 0;
+        }
+      });
+      scene.add(c);
+      crystals.push(c);
+    }
   });
-  // halo magenta autour du cristal
-  const crystalLight = new THREE.PointLight(0xff40d0, 3, 6, 2);
-  crystalLight.position.set(-1.25, 1.55, -1.75);
-  scene.add(crystalLight);
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
@@ -274,13 +326,13 @@
     if (toggle && !prevToggle) mode = (mode === 'play') ? 'explore' : 'play'; // bascule (front montant)
     prevToggle = toggle;
 
-    if (mode === 'play') {
+    if (GAME_ENABLED && mode === 'play') {
       const mv = (Math.hypot(lx, ly) > 0.18) ? { x: lx, y: ly } : null;
       const aim = (Math.hypot(rx, ry) > 0.5) ? { x: rx, y: ry } : null;
       if (window.__vrInput) window.__vrInput(mv, aim, blow);
     } else {
-      if (window.__vrInput) window.__vrInput(null, null, false);  // fantôme à l'arrêt
-      // déplacement relatif à l'orientation de la tête
+      // EXPLORATION (ou jeu masqué) : on se déplace
+      if (GAME_ENABLED && window.__vrInput) window.__vrInput(null, null, false); // fantôme à l'arrêt
       camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
       _rightv.crossVectors(_fwd, _up).normalize();
       const SPD = 1.7 * dt;
@@ -291,17 +343,20 @@
       const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;         // pivot par crans (confort)
       if (snap && !prevSnap) player.rotateY(-snap * Math.PI / 6);
       prevSnap = snap;
+      // GARDE-FOU : on reste dans le jardin (rayon BOUND_R)
+      const pr = Math.hypot(player.position.x, player.position.z);
+      if (pr > BOUND_R) { player.position.x *= BOUND_R / pr; player.position.z *= BOUND_R / pr; }
     }
   }
 
   renderer.setAnimationLoop((time) => {
     if (presenting) {
       updateVR(time);
-      if (typeof window.loop === 'function') window.loop(time);   // le jeu tourne dans les deux modes
+      if (GAME_ENABLED && typeof window.loop === 'function') window.loop(time);
     }
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
-    if (crystal) crystal.rotation.y += 0.012;  // le cristal tourne doucement
-    tex.needsUpdate = true;   // repousse le canvas (2D) vers le GPU
+    for (const c of crystals) c.rotation.y += 0.006;   // les cristaux tournent doucement
+    if (GAME_ENABLED) tex.needsUpdate = true;
     renderer.render(scene, camera);
   });
 </script>
