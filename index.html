@@ -461,7 +461,7 @@
   });
 
   // --- Champignons lumineux (models/mushroom.glb) plantés sur l'herbe ---
-  new GLTFLoader().load('models/mushroom.glb', function (gltf) {
+  new GLTFLoader().load('models/mushroom.glb?v=2', function (gltf) {
     const base = gltf.scene;
     mushroomBase = base;                                // réutilisé pour le jardinage
     const spots = [                                   // (x,z) + taille ; base posée sur l'herbe (y=0)
