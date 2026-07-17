@@ -89,6 +89,7 @@
 <script type="module">
   import * as THREE from 'three';
   import { VRButton } from './vendor/VRButton.js';
+  import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
 
   const gameCanvas = document.getElementById('game');
 
@@ -197,6 +198,31 @@
   }
   clouds.forEach(placeCloud);
 
+  // ============================================================
+  //  NOTRE PREMIER OBJET 3D : le cristal (models/crystal.glb)
+  //  fabriqué dans Blender, flotte devant, tourne doucement.
+  // ============================================================
+  let crystal = null;
+  new GLTFLoader().load('models/crystal.glb', function (gltf) {
+    crystal = gltf.scene;
+    crystal.scale.setScalar(0.32);
+    crystal.position.set(-1.25, 1.55, -1.9);   // devant/gauche, plus proche que l'écran de jeu → bien en 3D
+    crystal.traverse(function (o) {
+      if (o.isMesh && o.material) {
+        o.material.emissive = new THREE.Color(0xff33cc);
+        o.material.emissiveIntensity = 2.2;     // auto-illuminé (glow néon)
+        if ('transmission' in o.material) o.material.transmission = 0; // rendu solide net en VR
+        o.material.roughness = 0.12;
+        o.material.metalness = 0;
+      }
+    });
+    scene.add(crystal);
+  });
+  // halo magenta autour du cristal
+  const crystalLight = new THREE.PointLight(0xff40d0, 3, 6, 2);
+  crystalLight.position.set(-1.25, 1.55, -1.75);
+  scene.add(crystalLight);
+
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
@@ -244,6 +270,7 @@
       if (typeof window.loop === 'function') window.loop(time); // avance le jeu en VR
     }
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
+    if (crystal) crystal.rotation.y += 0.012;  // le cristal tourne doucement
     tex.needsUpdate = true;   // repousse le canvas (2D) vers le GPU
     renderer.render(scene, camera);
   });
