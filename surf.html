@@ -1546,16 +1546,12 @@
     if (raw && typeof raw === 'object') return { objects: raw.objects || [], carScale: (raw.carScale != null ? raw.carScale : null), pedScale: (raw.pedScale != null ? raw.pedScale : null), strollerScale: (raw.strollerScale != null ? raw.strollerScale : null), busScale: (raw.busScale != null ? raw.busScale : null) };
     return { objects: [], carScale: null, pedScale: null, strollerScale: null, busScale: null };
   }
-  // au démarrage : Supabase (partagé) + localStorage, on prend le plus fourni (RÉCUPÉRATION si Supabase vidé)
+  // SURF : lit UNIQUEMENT Supabase (source de vérité partagée PC→casque). Pas de localStorage → jamais de vieille version cachée sur le casque.
   (async () => {
-    let sbRaw = null, lsRaw = null;
-    try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); sbRaw = j && j[0] && j[0].data; } } catch (e) {}
-    try { lsRaw = JSON.parse(localStorage.getItem('wispy_layout') || 'null'); } catch (e) {}
-    const S = extractLayout(sbRaw), L = extractLayout(lsRaw);
+    let sbRaw = null;
+    try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data&t=' + Date.now(), { cache: 'no-store', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); sbRaw = j && j[0] && j[0].data; } } catch (e) {}
+    const S = extractLayout(sbRaw);
     let objects = S.objects, carScale = S.carScale, pedScl = S.pedScale, strScl = S.strollerScale, busScl = S.busScale;
-    if (L.objects.length > S.objects.length) {          // localStorage plus riche → on lit (SANS réécrire : surf = lecture seule)
-      objects = L.objects; if (L.carScale != null) carScale = L.carScale; if (L.pedScale != null) pedScl = L.pedScale; if (L.strollerScale != null) strScl = L.strollerScale; if (L.busScale != null) busScl = L.busScale;
-    }
     if (carScale != null) applyCarScale(carScale);
     if (busScl != null) applyBusScale(busScl);
     if (pedScl != null) applyPedScale(pedScl);
