@@ -55,7 +55,7 @@
   <div id="victory" class="overlay hidden"><button id="btn-replay">replay</button></div>
 </div>
 
-<div id="info">👻 Wispy Puff VR — <b>PC :</b> joystick (bas-gauche) ou <b>WASD</b> pour voler · <b>glisser la souris</b> = regarder · <b>⬆/⬇</b> ou Espace/Maj = monter/descendre · <b>F</b> souffler · <b>G</b> planter. <b>Mobile :</b> joystick. <b>Casque :</b> bouton ENTER VR.</div>
+<div id="info">🧡 Wispy Puff — dirige le personnage ! <b>PC :</b> joystick (bas-gauche) ou <b>WASD</b> = marcher · <b>glisser la souris</b> = tourner la caméra · <b>Espace</b> ou ⤒ = sauter · attrape les diamants ! <b>Mobile :</b> joystick + bouton saut. <b>Casque :</b> ENTER VR (stick = marcher, A/B = saut).</div>
 
 <!-- 2) Le jeu, inchangé (il pilote sa propre boucle via requestAnimationFrame) -->
 <script src="game.js"></script>
@@ -105,6 +105,61 @@
   player.add(camera);
   scene.add(player);
 
+  // ============================================================
+  //  PERSONNAGE JOUABLE (placeholder — sera remplacé par le GLB Meshy animé)
+  //  Dirigé au joystick : MARCHE + SAUT + ramasse les DIAMANTS. Caméra 3e personne.
+  // ============================================================
+  const hero = new THREE.Group();
+  const heroMesh = new THREE.Group();      // partie visuelle (bob de marche) séparée de la physique
+  {
+    const orange = new THREE.MeshStandardMaterial({ color: 0xff7a2e, roughness: 0.55 });
+    const cream  = new THREE.MeshStandardMaterial({ color: 0xffe0b0, roughness: 0.7 });
+    const white  = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const black  = new THREE.MeshStandardMaterial({ color: 0x14141c });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 24, 18), orange);
+    body.scale.set(1, 1.15, 1); body.position.y = 0.62; heroMesh.add(body);
+    const tummy = new THREE.Mesh(new THREE.SphereGeometry(0.33, 20, 16), cream);
+    tummy.scale.set(1, 1.05, 0.55); tummy.position.set(0, 0.55, 0.28); heroMesh.add(tummy);
+    for (const sx of [-0.17, 0.17]) {        // yeux
+      const e = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), white);
+      e.position.set(sx, 0.9, 0.4); e.scale.set(1, 1.25, 0.7); heroMesh.add(e);
+      const p = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), black);
+      p.position.set(sx, 0.9, 0.5); heroMesh.add(p);
+    }
+    for (const sx of [-0.26, 0.26]) {        // oreilles
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.36, 12), orange);
+      ear.position.set(sx, 1.16, 0); ear.rotation.z = sx > 0 ? -0.25 : 0.25; heroMesh.add(ear);
+    }
+    for (const sx of [-0.22, 0.22]) {        // pieds
+      const f = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), cream);
+      f.scale.set(1, 0.55, 1.4); f.position.set(sx, 0.12, 0.05); heroMesh.add(f);
+    }
+  }
+  hero.add(heroMesh);
+  hero.position.set(0, 0, 2);
+  hero.rotation.y = Math.PI;                 // regarde vers le centre du jardin
+  scene.add(hero);
+
+  // physique + réglages du perso
+  let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
+  const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 14;
+  function tryJump() { if (heroOnGround) { heroVelY = HERO_JUMP; heroOnGround = false; } }
+
+  // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
+  let camYaw = Math.PI, camPitch = 0.42;
+  const CAM_DIST = 5.4;
+  const _camTarget = new THREE.Vector3(), _hv = new THREE.Vector3();
+  function updateFollowCam() {
+    _camTarget.set(hero.position.x, hero.position.y + 1.0, hero.position.z);
+    const cd = CAM_DIST * Math.cos(camPitch);
+    camera.position.set(
+      _camTarget.x + Math.sin(camYaw) * cd,
+      _camTarget.y + CAM_DIST * Math.sin(camPitch),
+      _camTarget.z + Math.cos(camYaw) * cd
+    );
+    camera.lookAt(_camTarget);
+  }
+
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(devicePixelRatio);
   renderer.setSize(innerWidth, innerHeight);
@@ -120,9 +175,9 @@
   };
   styleVR(); let _vt = 0; const _vi = setInterval(function () { styleVR(); if (++_vt > 12) clearInterval(_vi); }, 200);
 
-  // FANTÔME : vol libre — pas de saut ni de gravité. Vertical mobile via boutons ⬆/⬇.
-  let mobileUp = false, mobileDown = false;
-  function jump() {}   // conservé (bouton A/B) mais sans effet : le fantôme vole
+  // PERSO : marche + saut + gravité (le fantôme volant est désactivé).
+  let mobileUp = false, mobileDown = false;   // (obsolètes — plus de vol vertical)
+  function jump() { tryJump(); }   // bouton A/B (VR) = saut
 
   // Souffle (bulle) : sources d'entrée (VR gâchette / mobile bouton / PC touche F)
   let vrTrigger = false, mobileBlow = false, pcBlow = false;
@@ -136,8 +191,7 @@
       case 'KeyS': case 'ArrowDown': kS = true; break;
       case 'KeyA': case 'ArrowLeft': kA = true; break;
       case 'KeyD': case 'ArrowRight': kD = true; break;
-      case 'Space': mobileUp = true; e.preventDefault(); break;
-      case 'ShiftLeft': case 'ShiftRight': mobileDown = true; break;
+      case 'Space': if (!e.repeat) tryJump(); e.preventDefault(); break;
     }
   });
   addEventListener('keyup', (e) => {
@@ -147,8 +201,6 @@
       case 'KeyS': case 'ArrowDown': kS = false; break;
       case 'KeyA': case 'ArrowLeft': kA = false; break;
       case 'KeyD': case 'ArrowRight': kD = false; break;
-      case 'Space': mobileUp = false; break;
-      case 'ShiftLeft': case 'ShiftRight': mobileDown = false; break;
     }
   });
 
@@ -160,12 +212,12 @@
   let joyX = 0, joyY = 0, mYaw = 0, mPitch = 0, lookId = null, lastLX = 0, lastLY = 0;
 
   if (!MOBILE) {
-    // PC : VOL LIBRE — regard en glissant la souris, JOYSTICK souris (+ WASD) pour voler, ⬆/⬇ (ou Espace/Maj)
+    // PC : 3e personne — souris = tourner la caméra autour du perso, JOYSTICK souris (+ WASD) = marcher, Espace = saut
     const dom = renderer.domElement;
     dom.style.touchAction = 'none';
     dom.addEventListener('contextmenu', (e) => e.preventDefault());   // pas de menu clic droit
 
-    // --- Regard : glisser-souris sur la scène (comme sur mobile) ---
+    // --- Caméra 3e personne : glisser la souris pour orbiter autour du perso ---
     let dragLook = false;
     dom.addEventListener('pointerdown', (e) => {
       dragLook = true; lastLX = e.clientX; lastLY = e.clientY;
@@ -173,17 +225,16 @@
     });
     dom.addEventListener('pointermove', (e) => {
       if (!dragLook) return;
-      mYaw   -= (e.clientX - lastLX) * 0.004;
-      mPitch -= (e.clientY - lastLY) * 0.004;
+      camYaw   -= (e.clientX - lastLX) * 0.005;
+      camPitch += (e.clientY - lastLY) * 0.005;
       lastLX = e.clientX; lastLY = e.clientY;
-      mPitch = Math.max(-1.2, Math.min(1.2, mPitch));
-      player.rotation.y = mYaw; camera.rotation.x = mPitch;
+      camPitch = Math.max(0.08, Math.min(1.3, camPitch));
     });
     const endLook = () => { dragLook = false; };
     dom.addEventListener('pointerup', endLook);
     dom.addEventListener('pointercancel', endLook);
 
-    // --- Joystick SOURIS (voler) en bas à gauche ---
+    // --- Joystick SOURIS (marcher) en bas à gauche ---
     const base = document.createElement('div');
     base.style.cssText = 'position:fixed;left:24px;bottom:70px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.4);z-index:30;touch-action:none;cursor:grab;';
     const knob = document.createElement('div');
@@ -201,17 +252,11 @@
     const endJoy = () => { jactive = false; joyX = 0; joyY = 0; knob.style.left = '35px'; knob.style.top = '35px'; };
     base.addEventListener('pointerup', endJoy); base.addEventListener('pointercancel', endJoy);
 
-    // --- Boutons MONTER (⬆) / DESCENDRE (⬇) à la souris ---
-    function flyBtn(label, bottom, onHold) {
-      const el = document.createElement('div'); el.textContent = label;
-      el.style.cssText = 'position:fixed;right:24px;bottom:' + bottom + 'px;width:72px;height:72px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;display:flex;align-items:center;justify-content:center;font-size:34px;color:#fff;user-select:none;cursor:pointer;';
-      el.addEventListener('pointerdown', (e) => { onHold(true); try { el.setPointerCapture(e.pointerId); } catch (_) {} e.preventDefault(); });
-      el.addEventListener('pointerup', () => onHold(false));
-      el.addEventListener('pointercancel', () => onHold(false));
-      document.body.appendChild(el);
-    }
-    flyBtn('⬆', 168, (v) => { mobileUp = v; });
-    flyBtn('⬇', 80, (v) => { mobileDown = v; });
+    // --- Bouton SAUT (souris) ---
+    const jbtn = document.createElement('div'); jbtn.textContent = '⤒';
+    jbtn.style.cssText = 'position:fixed;right:24px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;display:flex;align-items:center;justify-content:center;font-size:40px;color:#fff;user-select:none;cursor:pointer;';
+    jbtn.addEventListener('pointerdown', (e) => { tryJump(); e.preventDefault(); });
+    document.body.appendChild(jbtn);
   } else {
     // TÉLÉPHONE : joystick (marcher) + glisser (regarder)
     const base = document.createElement('div');
@@ -235,27 +280,21 @@
     dom.addEventListener('touchstart', (e) => { const t = e.changedTouches[0]; lookId = t.identifier; lastLX = t.clientX; lastLY = t.clientY; }, { passive: false });
     dom.addEventListener('touchmove', (e) => {
       for (const t of e.changedTouches) if (t.identifier === lookId) {
-        mYaw -= (t.clientX - lastLX) * 0.005; mPitch -= (t.clientY - lastLY) * 0.005;
+        camYaw   -= (t.clientX - lastLX) * 0.005;   // orbite caméra autour du perso
+        camPitch += (t.clientY - lastLY) * 0.005;
         lastLX = t.clientX; lastLY = t.clientY;
-        mPitch = Math.max(-1.2, Math.min(1.2, mPitch));
-        player.rotation.y = mYaw; camera.rotation.x = mPitch;
+        camPitch = Math.max(0.08, Math.min(1.3, camPitch));
       }
       e.preventDefault();
     }, { passive: false });
     const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
     dom.addEventListener('touchend', endLook); dom.addEventListener('touchcancel', endLook);
 
-    // Boutons MONTER (⬆) / DESCENDRE (⬇) — le fantôme vole
-    function flyBtn(label, bottom, onHold) {
-      const el = document.createElement('div'); el.textContent = label;
-      el.style.cssText = 'position:fixed;right:24px;bottom:' + bottom + 'px;width:84px;height:84px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:38px;color:#fff;user-select:none;';
-      el.addEventListener('touchstart', (e) => { onHold(true); e.preventDefault(); }, { passive: false });
-      el.addEventListener('touchend', () => onHold(false));
-      el.addEventListener('touchcancel', () => onHold(false));
-      document.body.appendChild(el);
-    }
-    flyBtn('⬆', 176, (v) => { mobileUp = v; });
-    flyBtn('⬇', 80, (v) => { mobileDown = v; });
+    // Bouton SAUT
+    const jbtn = document.createElement('div'); jbtn.textContent = '⤒';
+    jbtn.style.cssText = 'position:fixed;right:24px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:40px;color:#fff;user-select:none;';
+    jbtn.addEventListener('touchstart', (e) => { tryJump(); e.preventDefault(); }, { passive: false });
+    document.body.appendChild(jbtn);
 
     // Bouton SOUFFLER (à gauche du saut)
     const bbtn = document.createElement('div');
@@ -856,7 +895,7 @@
   const realRAF = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = function (cb) { return presenting ? 0 : realRAF(cb); };
   renderer.xr.addEventListener('sessionstart', () => { presenting = true; if (controls) controls.enabled = false; try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {} });
-  renderer.xr.addEventListener('sessionend', () => { presenting = false; if (controls) controls.enabled = true; if (typeof window.loop === 'function') realRAF(window.loop); });
+  renderer.xr.addEventListener('sessionend', () => { presenting = false; player.position.set(0, 0, 0); player.rotation.set(0, 0, 0); if (controls) controls.enabled = true; if (typeof window.loop === 'function') realRAF(window.loop); });
 
   // ============================================================
   //  ENTRÉES + DEUX MODES
@@ -896,23 +935,28 @@
       const aim = (Math.hypot(rx, ry) > 0.5) ? { x: rx, y: ry } : null;
       if (window.__vrInput) window.__vrInput(mv, aim, blow);
     } else {
-      // FANTÔME : VOL LIBRE 6DOF — vole vers le regard (stick gauche) + monter/descendre (stick droit haut/bas)
+      // PERSO AU SOL : stick gauche = marche (relative au regard casque), A/B = saut, stick droit G/D = pivote la vue
       if (GAME_ENABLED && window.__vrInput) window.__vrInput(null, null, false);
-      camera.getWorldDirection(_fwd); _fwd.normalize();           // regard COMPLET (haut/bas inclus)
-      _rightv.set(_fwd.x, 0, _fwd.z);
-      if (_rightv.lengthSq() < 1e-4) _rightv.set(0, 0, -1);
-      _rightv.normalize(); _rightv.crossVectors(_rightv, _up).normalize();   // droite horizontale
-      const SPD = 2.6 * dt;
-      if (Math.hypot(lx, ly) > 0.15) {
-        player.position.addScaledVector(_fwd, -ly * SPD);          // avance = vole vers où tu regardes (monte/descend)
-        player.position.addScaledVector(_rightv, lx * SPD);        // strafe latéral
+      camera.getWorldDirection(_fwd); _fwd.y = 0;                  // regard casque à plat
+      if (_fwd.lengthSq() < 1e-4) _fwd.set(0, 0, -1);
+      _fwd.normalize();
+      _rightv.crossVectors(_fwd, _up).normalize();                // droite horizontale
+      heroMoving = Math.hypot(lx, ly) > 0.15;
+      if (heroMoving) {
+        _hv.set(0, 0, 0).addScaledVector(_fwd, -ly).addScaledVector(_rightv, lx);
+        if (_hv.lengthSq() > 1e-4) {
+          _hv.normalize();
+          hero.position.x += _hv.x * HERO_SPEED * dt;
+          hero.position.z += _hv.z * HERO_SPEED * dt;
+          const tgt = Math.atan2(_hv.x, _hv.z);                    // oriente le perso
+          let d = tgt - hero.rotation.y;
+          while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+          hero.rotation.y += d * Math.min(1, dt * 12);
+        }
       }
-      if (Math.abs(ry) > 0.4) player.position.y += -ry * SPD;      // stick DROIT haut/bas = monter / descendre
-      const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;          // stick droit gauche/droite = pivoter
+      const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;          // stick droit = pivote la VUE (rig casque)
       if (snap && !prevSnap) player.rotateY(-snap * Math.PI / 6);
       prevSnap = snap;
-      const pr = Math.hypot(player.position.x, player.position.z); // reste dans le dôme du ciel
-      if (pr > 45) { player.position.x *= 45 / pr; player.position.z *= 45 / pr; }
     }
   }
 
@@ -923,30 +967,43 @@
       updateVR(time);
       if (GAME_ENABLED && typeof window.loop === 'function') window.loop(time);
     } else {
-      // MOBILE + PC : vol libre vers le regard — joystick (souris/tactile) + WASD/flèches (PC)
+      // MOBILE + PC : MARCHE du perso relative à la caméra (joystick + WASD)
       let mx = joyX, my = joyY;
       if (kW) my -= 1; if (kS) my += 1; if (kA) mx -= 1; if (kD) mx += 1;   // clavier PC
       const mag = Math.hypot(mx, my);
-      if (mag > 0.05) {
-        if (mag > 1) { mx /= mag; my /= mag; }                     // diagonale pas plus rapide
-        camera.getWorldDirection(_fwd); _fwd.normalize();          // regard complet (haut/bas inclus)
-        _rightv.set(_fwd.x, 0, _fwd.z);
-        if (_rightv.lengthSq() < 1e-4) _rightv.set(0, 0, -1);
-        _rightv.normalize(); _rightv.crossVectors(_rightv, _up).normalize();
-        const SPD = 2.4 * dt;
-        player.position.addScaledVector(_fwd, -my * SPD);          // avant = vole vers où tu regardes
-        player.position.addScaledVector(_rightv, mx * SPD);        // strafe latéral
-        const pr = Math.hypot(player.position.x, player.position.z);
-        if (pr > 45) { player.position.x *= 45 / pr; player.position.z *= 45 / pr; }
+      heroMoving = mag > 0.05;
+      if (heroMoving) {
+        if (mag > 1) { mx /= mag; my /= mag; }
+        const fwdX = -Math.sin(camYaw), fwdZ = -Math.cos(camYaw);   // avant = s'éloigner de la caméra
+        const rgtX = -fwdZ, rgtZ = fwdX;                            // droite caméra
+        let dx = fwdX * (-my) + rgtX * mx;
+        let dz = fwdZ * (-my) + rgtZ * mx;
+        const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+        hero.position.x += dx * HERO_SPEED * dt;
+        hero.position.z += dz * HERO_SPEED * dt;
+        const tgt = Math.atan2(dx, dz);                             // oriente le perso vers son déplacement
+        let d = tgt - hero.rotation.y;
+        while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+        hero.rotation.y += d * Math.min(1, dt * 12);
       }
     }
-    // FANTÔME : monte/descend (boutons ⬆/⬇ ou Espace/Maj) + reste dans un volume raisonnable (aucune gravité)
-    if (!presenting) { if (mobileUp) player.position.y += 2.6 * dt; if (mobileDown) player.position.y -= 2.6 * dt; }
-    player.position.y = Math.max(0.4, Math.min(40, player.position.y));
+    // GRAVITÉ + SAUT du perso (commun PC/mobile/VR) + limite du jardin
+    {
+      heroVelY -= HERO_GRAVITY * dt;
+      hero.position.y += heroVelY * dt;
+      if (hero.position.y <= 0) { hero.position.y = 0; heroVelY = 0; heroOnGround = true; }
+      const hpr = Math.hypot(hero.position.x, hero.position.z);
+      if (hpr > HERO_CLAMP) { hero.position.x *= HERO_CLAMP / hpr; hero.position.z *= HERO_CLAMP / hpr; }
+      // bob de marche (placeholder) — sera remplacé par l'anim du GLB Meshy
+      if (heroMoving && heroOnGround) heroWalk += dt * 12; else heroWalk *= 0.88;
+      heroMesh.position.y = Math.abs(Math.sin(heroWalk)) * 0.09;
+      heroMesh.rotation.z = Math.sin(heroWalk) * 0.05;
+      if (!presenting) updateFollowCam();                          // caméra suit le perso (hors VR)
+    }
     if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
-    // cristaux : rotation + flottement + COLLECTE
-    camera.getWorldPosition(_chest);                    // position réelle de la tête
+    // cristaux : rotation + flottement + COLLECTE (par le PERSO)
+    _chest.set(hero.position.x, hero.position.y + 0.7, hero.position.z);   // corps du perso
     for (const c of crystals) {
       if (c.userData.done) continue;
       c.rotation.y += 0.01;
