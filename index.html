@@ -1499,7 +1499,8 @@
     try { localStorage.setItem('wispy_layout', JSON.stringify(data)); } catch (e) {}
     // SÉCURITÉ : l'auto-sauvegarde n'écrase JAMAIS Supabase avec un layout VIDE (seul le bouton force le vide)
     if (objects.length > 0 || (opts && opts.force)) {
-      return fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1', { method: 'PATCH', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ data }) });
+      // UPSERT : crée la ligne id=1 si elle n'existe pas (un PATCH sur une ligne absente ne fait rien)
+      return fetch(SB_URL + '/rest/v1/wispy_layout', { method: 'POST', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ id: 1, data }) });
     }
     return Promise.resolve();
   }
@@ -1540,7 +1541,7 @@
     let objects = S.objects, carScale = S.carScale, pedScl = S.pedScale, strScl = S.strollerScale, busScl = S.busScale;
     if (L.objects.length > S.objects.length) {          // localStorage plus riche → on restaure
       objects = L.objects; if (L.carScale != null) carScale = L.carScale; if (L.pedScale != null) pedScl = L.pedScale; if (L.strollerScale != null) strScl = L.strollerScale; if (L.busScale != null) busScl = L.busScale;
-      fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1', { method: 'PATCH', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ data: { objects, carScale: carScale != null ? carScale : trafficScale, pedScale: pedScl != null ? pedScl : pedScale, strollerScale: strScl != null ? strScl : strollerScale } }) }).catch(() => {});
+      fetch(SB_URL + '/rest/v1/wispy_layout', { method: 'POST', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ id: 1, data: { objects, carScale: carScale != null ? carScale : trafficScale, pedScale: pedScl != null ? pedScl : pedScale, strollerScale: strScl != null ? strScl : strollerScale, busScale: busScl != null ? busScl : busScale } }) }).catch(() => {});
     }
     if (carScale != null) applyCarScale(carScale);
     if (busScl != null) applyBusScale(busScl);
