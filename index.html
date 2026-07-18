@@ -55,7 +55,25 @@
   <div id="victory" class="overlay hidden"><button id="btn-replay">replay</button></div>
 </div>
 
-<div id="info">🧡 Wispy Puff — dirige le personnage ! <b>PC :</b> joystick (bas-gauche) ou <b>WASD</b> = marcher · <b>glisser la souris</b> = tourner la caméra · <b>Espace</b> ou ⤒ = sauter · attrape les diamants ! <b>Mobile :</b> joystick + bouton saut. <b>Casque :</b> ENTER VR (stick = marcher, A/B = saut).</div>
+<div id="info">🧡 Wispy Puff — dirige le personnage ! <b>PC :</b> joystick (bas-gauche) ou <b>WASD</b> = marcher · <b>glisser la souris</b> = tourner la caméra · <b>Espace</b> ou ⤒ = sauter · attrape les diamants et les pièces d'or ! <b>Mobile :</b> joystick + bouton saut. <b>Casque :</b> ENTER VR (stick = marcher, A/B = saut).</div>
+
+<!-- Musique de fond + bouton on/off -->
+<audio id="bgm" src="audio/musique.mp3?v=1" loop preload="auto"></audio>
+<button id="btnMusic" title="Musique" style="position:fixed;top:12px;right:12px;z-index:50;width:48px;height:48px;border:none;border-radius:50%;background:rgba(20,20,40,0.55);color:#fff;font-size:22px;cursor:pointer;backdrop-filter:blur(4px);box-shadow:0 2px 8px rgba(0,0,0,0.3)">🎵</button>
+<script>
+  (function () {
+    var bgm = document.getElementById('bgm'), btn = document.getElementById('btnMusic');
+    bgm.volume = 0.4; var muted = false, started = false;
+    function tryStart() { if (muted || started) return; var p = bgm.play(); if (p && p.then) p.then(function () { started = true; }).catch(function () {}); }
+    window.__startMusic = tryStart;                                  // appelable depuis la scène VR (sessionstart)
+    ['pointerdown', 'keydown', 'touchstart'].forEach(function (ev) { document.addEventListener(ev, tryStart); });
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation(); muted = !muted;
+      if (muted) { bgm.pause(); btn.textContent = '🔇'; btn.style.opacity = 0.5; }
+      else { btn.textContent = '🎵'; btn.style.opacity = 1; started = false; tryStart(); }
+    });
+  })();
+</script>
 
 <!-- 2) Le jeu, inchangé (il pilote sa propre boucle via requestAnimationFrame) -->
 <script src="game.js"></script>
@@ -633,6 +651,32 @@
     refreshHUD();
   });
 
+  // --- PIÈCES D'OR : collectibles EN HAUTEUR (à attraper en sautant / double-saut) → compteur "Or" dans le HUD ---
+  const coins = [];
+  new GLTFLoader().load('models/coin.glb?v=1', function (gltf) {
+    const base = gltf.scene;
+    base.traverse(function (o) {
+      if (o.isMesh && o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) { mt.metalness = 0.25; mt.roughness = 0.35; mt.emissive = new THREE.Color(0x4a3200); mt.emissiveIntensity = 0.35; mt.side = THREE.DoubleSide; } }); }
+    });
+    const S = 0.34, lanes = [-1.5, 0, 1.5], spots = [];
+    let li = 0;
+    for (let x = -16; x <= 24; x += 3.2) {                    // arcs de 3 pièces (monte→descend) le long de la route
+      const z = lanes[li % 3]; li++;
+      spots.push({ x: x - 0.95, z: z, y: 1.45 });
+      spots.push({ x: x,        z: z, y: 1.95 });
+      spots.push({ x: x + 0.95, z: z, y: 1.45 });
+    }
+    for (let i = 0; i < spots.length; i++) {
+      const c = base.clone(true);
+      c.scale.setScalar(S);
+      c.position.set(spots[i].x, spots[i].y, spots[i].z);
+      c.rotation.y = i * 0.6;
+      c.userData = { collected: false, pop: 0, baseScale: S, baseY: spots[i].y };
+      scene.add(c); coins.push(c);
+    }
+    refreshHUD();
+  });
+
   // --- Champignons (Meshy, réalistes) plantés sur l'herbe — obstacles-plateformes ---
   const mushrooms = [];                                 // (dandinement : seulement les plantés)
   const mushroomObstacles = [];                         // {x,z,r,top} : à SAUTER par-dessus / se poser dessus
@@ -978,7 +1022,7 @@
   // ============================================================
   //  JEU : collecte des cristaux — HUD + son + état
   // ============================================================
-  let collected = 0, totalCrystals = 0, seeds = 0;
+  let collected = 0, totalCrystals = 0, seeds = 0, goldCoins = 0;
   let mushroomBase = null, treeBase = null, treeOffset = 0;
   const _chest = new THREE.Vector3();
 
@@ -996,14 +1040,15 @@
     hudCtx.clearRect(0, 0, 512, 140);
     hudCtx.fillStyle = 'rgba(18,18,38,0.55)'; hudCtx.fillRect(0, 0, 512, 140);
     hudCtx.fillStyle = '#eaf2ff';
-    hudCtx.font = 'bold 60px Trebuchet MS, sans-serif';
     hudCtx.textAlign = 'center'; hudCtx.textBaseline = 'middle';
+    let fs = 60;                                              // auto-ajuste la taille pour que 3 compteurs tiennent
+    do { hudCtx.font = 'bold ' + fs + 'px Trebuchet MS, sans-serif'; if (hudCtx.measureText(msg).width <= 496) break; fs -= 4; } while (fs > 24);
     hudCtx.fillText(msg, 256, 72);
     hudTex.needsUpdate = true;
   }
   let hudBase = 'Cristaux 0 / …', hudFlashUntil = 0;
   function refreshHUD() {
-    hudBase = 'Cristaux ' + collected + '/' + totalCrystals + '    Graines ' + seeds;
+    hudBase = 'Cristaux ' + collected + '/' + totalCrystals + '   Graines ' + seeds + '   Or ' + goldCoins;
     if (!hudFlashUntil) updateHUD(hudBase);
   }
   updateHUD(hudBase);
@@ -1082,7 +1127,7 @@
   let presenting = false;
   const realRAF = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = function (cb) { return presenting ? 0 : realRAF(cb); };
-  renderer.xr.addEventListener('sessionstart', () => { presenting = true; if (controls) controls.enabled = false; try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {} });
+  renderer.xr.addEventListener('sessionstart', () => { presenting = true; if (controls) controls.enabled = false; try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {} try { if (window.__startMusic) window.__startMusic(); } catch (e) {} });
   renderer.xr.addEventListener('sessionend', () => { presenting = false; player.position.set(0, 0, 0); player.rotation.set(0, 0, 0); if (controls) controls.enabled = true; if (typeof window.loop === 'function') realRAF(window.loop); });
 
   // ============================================================
@@ -1529,6 +1574,24 @@
       if (_chest.distanceTo(c.position) < 1.4) {          // ramassé ! (+1 graine)
         c.userData.collected = true; ding(); collected++; seeds++;
         if (collected >= totalCrystals) { updateHUD('Tous les cristaux ! Plante tes graines'); hudFlashUntil = time + 2200; }
+        refreshHUD();
+      }
+    }
+    // pièces d'or : rotation (flip) + flottement + COLLECTE (en sautant) → compteur "Or"
+    for (const c of coins) {
+      if (c.userData.done) continue;
+      c.rotation.y += 0.06;
+      if (!c.userData.collected) c.position.y = c.userData.baseY + Math.sin(time * 0.003 + c.position.x) * 0.1;
+      if (c.userData.collected) {                          // animation de ramassage (grossit + s'efface)
+        c.userData.pop += dt * 3.4;
+        c.scale.setScalar(c.userData.baseScale * (1 + c.userData.pop * 1.4));
+        c.traverse(o => { if (o.isMesh && o.material) { o.material.transparent = true; o.material.opacity = Math.max(0, 1 - c.userData.pop); } });
+        if (c.userData.pop >= 1) { c.visible = false; c.userData.done = true; }
+        continue;
+      }
+      if (_chest.distanceTo(c.position) < 1.3) {           // attrapée en l'air ! (+1 Or)
+        c.userData.collected = true; ding(); goldCoins++;
+        updateHUD('+1 Pièce d\'or !   (Or ' + goldCoins + ')'); hudFlashUntil = time + 1100;
         refreshHUD();
       }
     }
