@@ -133,7 +133,8 @@
   }
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x9fc4ea); // secours si la texture du ciel tarde (bleu jour)
+  scene.background = new THREE.Color(0xcfe6f2); // couleur horizon (secours)
+  scene.fog = new THREE.Fog(0xcfe6f2, 42, 120); // brouillard couleur horizon → fond le décor lointain en douceur (fini le bord net)
 
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 100);
   camera.position.set(0, 1.6, 0); // hauteur des yeux (assis/debout) ; le casque prend le relais en VR
@@ -234,7 +235,7 @@
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
-  const ROAD = { z: 0, len: 110, w: 9, sideW: 3.2, sideH: 0.22 };   // route ÉLARGIE (w 6→9) pour 3 voies bien espacées ; longue 110 ; trottoirs 3.2
+  const ROAD = { z: 0, len: 180, w: 9, sideW: 3.2, sideH: 0.22 };   // route ÉLARGIE (w 6→9) ; TRÈS longue (bord caché dans le brouillard) ; trottoirs 3.2
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
   function tryJump() {
@@ -469,7 +470,7 @@
   }
   const GARDEN_R = 58;                                            // rayon du jardin (plateau doublé pour la route allongée)
   const GROUND_R = 160;                                          // SOL runner : grand disque qui suit le perso (couvre tout le champ visible)
-  const _groundTex = makeGrassTexture(); _groundTex.repeat.set(77, 77);   // densité d'herbe adaptée au grand disque
+  const _groundTex = makeGrassTexture(); _groundTex.repeat.set(77, 77); _groundTex.anisotropy = renderer.capabilities.getMaxAnisotropy();   // net + densité d'herbe adaptée
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(GROUND_R, 64),
     new THREE.MeshStandardMaterial({ map: _groundTex, roughness: 1, metalness: 0 })
@@ -566,10 +567,26 @@
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
   }
   const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(50, 32, 16),
-    new THREE.MeshBasicMaterial({ map: makeSkyTexture(), side: THREE.BackSide, depthWrite: false })
+    new THREE.SphereGeometry(320, 32, 16),                        // GRAND ciel (suit le perso → jamais de bord bleu plat)
+    new THREE.MeshBasicMaterial({ map: makeSkyTexture(), side: THREE.BackSide, depthWrite: false, fog: false })
   );
   scene.add(sky);
+  // NUAGES (billboards doux) — suivent le perso, toujours dans le ciel
+  const skyClouds = new THREE.Group();
+  {
+    const cc = document.createElement('canvas'); cc.width = cc.height = 128; const cx = cc.getContext('2d');
+    const puff = (px, py, r) => { const g = cx.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, 'rgba(255,255,255,0.96)'); g.addColorStop(0.6, 'rgba(255,255,255,0.72)'); g.addColorStop(1, 'rgba(255,255,255,0)'); cx.fillStyle = g; cx.beginPath(); cx.arc(px, py, r, 0, 7); cx.fill(); };
+    puff(52, 76, 30); puff(80, 72, 34); puff(64, 58, 27); puff(38, 74, 22); puff(94, 78, 22);
+    const cloudTex = new THREE.CanvasTexture(cc); cloudTex.colorSpace = THREE.SRGBColorSpace;
+    for (let i = 0; i < 18; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.92, depthWrite: false, fog: false }));
+      const a = (i / 18) * Math.PI * 2, r = 45 + (i * 37 % 90);
+      s.position.set(Math.cos(a) * r, 24 + (i * 13 % 22), Math.sin(a) * r * 0.7 + ((i * 29 % 40) - 20));
+      const sc = 16 + (i * 17 % 22); s.scale.set(sc, sc * 0.58, 1);
+      skyClouds.add(s);
+    }
+    scene.add(skyClouds);
+  }
 
   // --- Soleil (jour) : disque lumineux + halo additif ---
   if (DAYTIME) {
@@ -750,14 +767,14 @@
       // ROUTE À 3 VOIES : lignes de bord blanches continues + 2 lignes pointillées (séparent les 3 voies)
       x.fillStyle = '#e9e4d2'; x.fillRect(0, 9, 128, 5); x.fillRect(0, 114, 128, 5);   // lignes de bord (le long de la route)
       x.fillStyle = '#f2e7c4'; x.fillRect(24, 40, 80, 6); x.fillRect(24, 83, 80, 6);   // 2 lignes pointillées (z=-1 et z=+1)
-      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 4, 1); return t;
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 4, 1); t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t;   // net en angle rasant
     }
     function makeSideTex() {
       const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
       x.fillStyle = '#c3bcaa'; x.fillRect(0, 0, 128, 128);                         // dalles béton clair
       x.strokeStyle = 'rgba(120,114,102,0.6)'; x.lineWidth = 4;
       for (let i = 0; i <= 128; i += 32) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); }
-      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 1.5, 1); return t;
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 1.5, 1); t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t;
     }
     roadTex = makeAsphaltTex();
     roadMesh = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.len, ROAD.w), new THREE.MeshStandardMaterial({ map: roadTex, roughness: 1, metalness: 0 }));
@@ -1703,6 +1720,9 @@
       for (const s of sideMeshes) s.position.x = hx;               // trottoirs suivent
       if (ground) { ground.position.x = hx; if (ground.material.map) ground.material.map.offset.x = -hx / 4.14; }   // SOL vert suit (plus de trous bleus) + herbe qui DÉFILE
       if (grassMesh && grassMesh.visible) grassMesh.visible = false;   // brins 3D coupés en runner (défilement incohérent)
+      if (sky) sky.position.x = hx;                                // le ciel suit le perso (plus de bord bleu)
+      if (skyClouds) skyClouds.position.x = hx;                    // les nuages suivent
+
       if (decorReady) for (const it of recycleDecor) {             // décor posé : boucle sans fin
         while (it.mesh.position.x < hx - 26) it.mesh.position.x += it.span;
         while (it.mesh.position.x > hx + it.span - 26) it.mesh.position.x -= it.span;
