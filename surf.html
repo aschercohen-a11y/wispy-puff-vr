@@ -133,8 +133,8 @@
   }
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xcfe6f2); // couleur horizon (secours)
-  scene.fog = new THREE.Fog(0xcfe6f2, 42, 120); // brouillard couleur horizon → fond le décor lointain en douceur (fini le bord net)
+  scene.background = new THREE.Color(0xbfe0f6); // couleur horizon (secours)
+  scene.fog = new THREE.Fog(0xbfe0f6, 42, 120); // brouillard couleur horizon → fond le décor lointain en douceur (fini le bord net)
 
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 100);
   camera.position.set(0, 1.6, 0); // hauteur des yeux (assis/debout) ; le casque prend le relais en VR
@@ -527,18 +527,8 @@
   // Obstacles qui font ÉCLATER la bulle (rempli au fur et à mesure : buissons, arbres, maison)
   const obstacles = [];
 
-  // Limite : anneau de buissons VISIBLE + garde-fou en CODE (BOUND_R, appliqué dans updateVR)
+  // Limite : anneau de buissons — RETIRÉ en mode runner (il traversait la route)
   const BOUND_R = GARDEN_R - 1.5;
-  const bushGeo = new THREE.IcosahedronGeometry(0.6, 1);
-  const bushMat = new THREE.MeshStandardMaterial({ color: 0x2b6b3a, roughness: 1, flatShading: true });
-  for (let i = 0; i < 92; i++) {
-    const a = (i / 92) * Math.PI * 2;
-    const b = new THREE.Mesh(bushGeo, bushMat);
-    b.position.set(Math.cos(a) * GARDEN_R * 0.98, 0.35, Math.sin(a) * GARDEN_R * 0.98);
-    b.scale.setScalar(0.7 + Math.random() * 0.9);
-    scene.add(b);
-    obstacles.push({ pos: b.position.clone().setY(0.55), r: 0.55 * b.scale.x });
-  }
 
   // ============================================================
   //  ENVIRONNEMENT ENVELOPPANT : ciel + étoiles + nuages
@@ -551,11 +541,11 @@
     const x = c.getContext('2d');
     const g = x.createLinearGradient(0, 0, 0, 256);
     if (DAYTIME) {
-      g.addColorStop(0.00, '#2b6fd6'); // zénith bleu
-      g.addColorStop(0.45, '#5b9be6');
-      g.addColorStop(0.78, '#a9d4f2');
-      g.addColorStop(0.92, '#d8eefb'); // horizon pâle
-      g.addColorStop(1.00, '#cfe6f2');
+      g.addColorStop(0.00, '#2372da'); // zénith bleu franc
+      g.addColorStop(0.50, '#4a93e4');
+      g.addColorStop(0.80, '#8ec6f0'); // reste bleu plus bas
+      g.addColorStop(0.94, '#bfe0f6');
+      g.addColorStop(1.00, '#bfe0f6'); // horizon (accordé au brouillard)
     } else {
       g.addColorStop(0.00, '#05071a'); // zénith (nuit profonde)
       g.addColorStop(0.42, '#141a4d');
@@ -578,11 +568,11 @@
     const puff = (px, py, r) => { const g = cx.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, 'rgba(255,255,255,0.96)'); g.addColorStop(0.6, 'rgba(255,255,255,0.72)'); g.addColorStop(1, 'rgba(255,255,255,0)'); cx.fillStyle = g; cx.beginPath(); cx.arc(px, py, r, 0, 7); cx.fill(); };
     puff(52, 76, 30); puff(80, 72, 34); puff(64, 58, 27); puff(38, 74, 22); puff(94, 78, 22);
     const cloudTex = new THREE.CanvasTexture(cc); cloudTex.colorSpace = THREE.SRGBColorSpace;
-    for (let i = 0; i < 18; i++) {
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.92, depthWrite: false, fog: false }));
-      const a = (i / 18) * Math.PI * 2, r = 45 + (i * 37 % 90);
-      s.position.set(Math.cos(a) * r, 24 + (i * 13 % 22), Math.sin(a) * r * 0.7 + ((i * 29 % 40) - 20));
-      const sc = 16 + (i * 17 % 22); s.scale.set(sc, sc * 0.58, 1);
+    for (let i = 0; i < 6; i++) {                                 // quelques nuages seulement → ciel bleu bien visible
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.85, depthWrite: false, fog: false }));
+      const a = (i / 6) * Math.PI * 2 + 0.6, r = 60 + (i * 41 % 70);
+      s.position.set(Math.cos(a) * r, 34 + (i * 11 % 16), Math.sin(a) * r * 0.7 + ((i * 29 % 40) - 20));
+      const sc = 16 + (i * 17 % 20); s.scale.set(sc, sc * 0.55, 1);
       skyClouds.add(s);
     }
     scene.add(skyClouds);
