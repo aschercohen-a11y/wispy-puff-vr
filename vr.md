@@ -250,3 +250,58 @@ Oculus/
 - **Règle magique** : une **photo** d'objet → je le transforme en **3D texturée** (IA) → je le **plante** dans le jardin.
 
 *Wispy Puff VR — un petit fantôme, une bulle, un jardin magique. Fait à deux, dans le navigateur, pour le Meta Quest.*
+
+---
+
+## 🌆 SESSION — VILLAGE VIVANT (fontaine, PNJ, bus, route x2, atelier)
+
+### ⛲ Fontaine + EAU ANIMÉE (procédurale)
+- `models/fountain.glb` (Meshy, 36Mo→1.26Mo). Objet éditeur **⛲ Fontaine** (`s=2.2`).
+- L'eau du modèle est **peinte/figée** → je pose **mon eau animée par-dessus** (`buildFountainWater(m,s)` attaché à la pose, animé dans la boucle via `rec.water`).
+- Contenu : **jet central** (parabole, 80 gouttes THREE.Points), **8 cascades** en rubans (5 brins) tout autour (masquent les jets peints), **2 anneaux d'ondulation** (bassin = RingGeometry, vasque = disque) texture qui défile.
+- Calibré par **rendus Blender** (`dev/render_top.py` vue de dessus) : `FW = {BASIN_Y,BASIN_IN,BASIN_R,BOWL_Y,BOWL_R,SPOUT_Y,JT_R,JT_Y,LAND_R}`.
+- ⚠️ **Fusion NORMALE** (pas Additive) sinon l'eau **vire au blanc en VR** (accumulation additive).
+
+### 🪙 Pièces d'or ramassables
+- `models/coin.glb` (11.8Mo→132Ko). Semées **en hauteur** en arcs le long du parcours (à choper en **saut/double-saut**). Compteur **Or** dans le HUD (auto-fit du texte).
+- ⚠️ **Matériau cloné par pièce** (`o.material = o.material.clone()`) sinon le fondu de ramassage efface **toutes** les pièces (three.js `clone()` partage les matériaux).
+
+### 🎵 Musique de fond
+- `audio/musique.mp3` (WAV 11Mo→MP3 1Mo via `ffmpeg-static`). `<audio loop>` + bouton 🎵/🔇 (haut-droit). Démarre au 1er clic/touche/entrée VR (`window.__startMusic`).
+
+### 🧱 Objets de sol éditeur (procéduraux)
+- **🚪 Allée/entrée** (dallage pavé + 2 piliers pierre à chapeau rouge + haies) · **🧱 Dalle (sol)** (béton 2×2 seamless) · **🦓 Passage piéton** (bandes = **plans plats** `polygonOffset`, calé sur la route à y≈0.014 — pas un trottoir surélevé).
+- **Masquage de l'herbe** sous ces objets (`GROUND_TYPES`, `applyGroundMask()` : cache les instances d'herbe dans l'empreinte, recalculé pose/déplacement/redim/suppr/chargement).
+
+### 🚶 Piétons PNJ (personnages Meshy skinnés)
+- `models/kid.glb` (enfant Toy Story, 18Mo→7.75Mo) + `models/woman.glb` (femme, 16Mo→6.17Mo). **Skinnés** → optimize `--simplify false --compress quantize --texture-compress webp` (JAMAIS simplify, casse le skin). Root-motion **Hips** strippé (marche sur place, position pilotée).
+- `spawnPed(url,x,side,opts)` + `updatePeds(dt)`. IA 3 états : **walk** (patrouille trottoir) → **goto** (rejoint le passage piéton le plus proche `nearestCrosswalk`) → **cross** (traverse). Suit la hauteur du sol `pedGroundH(z)` (**pente douce** à la bordure trottoir↔route).
+- **Voitures s'arrêtent** pour tout piéton qui traverse : `crossBlock` recalculé chaque frame, ligne d'arrêt = `crossBlock.x + halfW + veh.halfX + 0.4` (roulent jusqu'au ras du passage, pas au loin).
+- **🚼 Poussette** `models/stroller.glb` (31Mo→504Ko, statique donc simplify OK). Bras **figés en pose "pousser"** (override quaternion `bind*delta` après l'anim, os `Left/RightArm`, `Left/RightForeArm`). Poussette posée **devant** la femme, suit sa taille (`pedScale`), pose au sol **déterministe** (`-strollerMinY * scale`).
+- **Taille piéton** réglable éditeur (🧍 −/+, `pedScale`, persistée). `updateMatrixWorld(true)` **avant** de mesurer la hauteur sinon échelle **géante**.
+
+### 🎨 Page-atelier `pose.html`
+- Studio séparé (femme qui marche + poussette + curseurs) pour caler **distance/taille/orientation/hauteur + angles bras** en direct, bouton **📋 Copier**. Valeurs récupérées → constantes du jeu (`STROLLER_DIST/H/YAW/YOFF`, `ARM_POSE`). Réglage retenu : dist 0.39, H 0.41, yaw 95°, armZ 1.30, armX 0.22, foreZ 0.36.
+
+### 🚗🚌 Trafic généralisé + BUS
+- Trafic **mixte** : chaque véhicule a ses **propres dimensions** (`vehDims(v)` : `groundY/top/halfX/halfZ/minGap` selon sa boîte + échelle). Voitures (`kind:'car'`, `setTrafficScale`) + `models/bus.glb` (24Mo→456Ko, `kind:'bus'`, `setBusScale`).
+- Bus : fonce vers le joueur, collision=mort, **toit = plateforme** (saut dessus OK, hauteur du toit propre au bus). Fumée d'échappement aussi. Réglage **🚗 / 🚌 Taille** (−/+, persistés `carScale`/`busScale`).
+- Double-saut (`heroJumps`), carry sur le toit (`hero.x -= veh.speed*dt`), anti-empilement par paire (`max(a.minGap,b.minGap)`).
+
+### 📏 Paysage DOUBLÉ
+- `ROAD.len 58→110`, `GARDEN_R 30→58`, `HERO_CLAMP 56`, herbe `11k→26k`, départ perso **-52** (tout début), 6 voitures + 2 bus, pièces/piétons sur tout le parcours.
+- **Duplication village test** (`duplicateVillage()` après `editApplyLayout`) : recopie les objets posés à x±58 (clones décoratifs, **PAS** dans `EDIT.placed` → non sauvegardés).
+
+### ⏳ Écran de chargement
+- Overlay `#loadingScreen` + barre `#loadingBar` pilotés par `THREE.DefaultLoadingManager` (onProgress/onLoad) — masque la scène le temps que les GLB chargent.
+
+### 🛠️ Éditeur — nav + sauvegarde fiable
+- **💾 Bouton Sauvegarder** (feedback ⏳/✅/⚠️). **Anti-perte** : l'auto-save n'écrit **jamais** un layout vide dans Supabase (seul le bouton force le vide). Récupération boot : compare Supabase vs localStorage, garde le plus fourni.
+- Navigation : **🖐️ outil Main** (toggle, glisser = déplacer, plus fiable que Espace) + **◀ ● ▶** aller Début/Centre/Fin. Espace+glisser aussi (capricieux selon navigateur → cache : Ctrl+Maj+R).
+- ⚠️ Tests headless = **LOAD/RENDER seulement, JAMAIS de clic qui déclenche editSave** (une fois écrasé le village de prod en cliquant `#edCarP` en test).
+
+### 🎬 Runner (rappel réglages)
+- Perso 3e personne, caméra **toujours derrière** (`camYaw` suit `hero.rotation.y + π`). VR : strafe relatif au regard (stick gauche), on reste derrière le perso. `HERO_HEIGHT=0.55`, `MODEL_YAW=0`, matériau `DoubleSide` (Meshy normales inversées). VR net : `setFramebufferScaleFactor(1.5)` + `setFoveation(0)`.
+
+### 📦 Modèles ajoutés cette session
+`fountain.glb` · `coin.glb` · `kid.glb` · `woman.glb` · `stroller.glb` · `bus.glb` · `audio/musique.mp3`. Sources brutes hors repo. Déploiement Coolify (app `pj5udv9xweahucsyyktq509d`) sur `wispyvr.swipego.app`.
