@@ -182,7 +182,7 @@
   function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
 
   // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
-  let camYaw = Math.PI, camPitch = 0.42;
+  let camYaw = Math.PI, camPitch = 0.62;      // vue en légère plongée (plateforme)
   const CAM_DIST = 6.4;
   const _camTarget = new THREE.Vector3(), _hv = new THREE.Vector3();
   function updateFollowCam() {
@@ -633,7 +633,7 @@
       m.userData.mush = { base: spots[i].s, ph: Math.random() * 6.28 };
       mushrooms.push(m);
       const bb = new THREE.Box3().setFromObject(m);       // obstacle-plateforme : rayon + hauteur du chapeau
-      mushroomObstacles.push({ x: spots[i].x, z: spots[i].z, r: Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 * 0.6, top: bb.max.y * 0.9 });
+      mushroomObstacles.push({ x: spots[i].x, z: spots[i].z, r: Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 * 0.6, top: bb.max.y * 0.82 });
     }
   });
 
@@ -1050,6 +1050,8 @@
         if (od2 >= rr * rr) continue;                                    // pas dans le champignon
         if (heroVelY <= 0 && prevY >= o.top - 0.06 && hero.position.y <= o.top) {
           hero.position.y = o.top; heroVelY = 0; heroOnGround = true;    // ATTERRIT / se tient dessus
+          hero.position.x += (o.x - hero.position.x) * 0.2;             // recentre sur le chapeau (perso + large)
+          hero.position.z += (o.z - hero.position.z) * 0.2;
         } else if (hero.position.y < o.top - 0.05) {                     // clippe le CÔTÉ (pas assez haut)
           const od = Math.sqrt(od2) || 0.0001;
           if (heroOnGround) {                                            // au sol → simple blocage (il bute)
