@@ -960,8 +960,8 @@
     return { x: best.mesh.position.x, halfW: (bb.max.x - bb.min.x) / 2 };   // demi-largeur des bandes le long de la route
   }
   // pose "pousser" des bras (delta appliqué par-dessus la pose de repos) — ajustable
-  const ARM_POSE = { LeftArm: [0, 0, 1.25], RightArm: [0, 0, -1.25], LeftForeArm: [0, 0, 0.35], RightForeArm: [0, 0, -0.35] };
-  const STROLLER_DIST = 0.28, STROLLER_H = 0.5, STROLLER_YAW = Math.PI / 2;   // poignée côté femme (avant du modèle = -X)
+  const ARM_POSE = { LeftArm: [0.22, 0, 1.30], RightArm: [0.22, 0, -1.30], LeftForeArm: [0, 0, 0.36], RightForeArm: [0, 0, -0.36] };   // calibré en atelier
+  const STROLLER_DIST = 0.39, STROLLER_H = 0.41, STROLLER_YAW = 95 * Math.PI / 180, STROLLER_YOFF = -0.01;   // calibré en atelier
   function setStrollerScale(s) {   // taille de la poussette réglable dans l'éditeur (indépendante de la taille piéton)
     strollerScale = Math.max(0.3, Math.min(4, s));
     for (const p of peds) if (p.stroller && p.strollerFit) p.stroller.scale.setScalar(p.strollerFit * strollerScale);   // le sol est recalculé chaque frame dans updatePeds
@@ -1030,7 +1030,7 @@
       if (p.stroller) {                                                       // poussette devant, avance avec la femme
         const rot = p.mesh.rotation.y, fx = Math.sin(rot), fz = Math.cos(rot), dist = STROLLER_DIST;
         const foot = -(p.strollerMinY || 0) * (p.strollerFit * strollerScale);   // bas du modèle → pose au sol (déterministe)
-        p.stroller.position.set(p.mesh.position.x + fx * dist, pedGroundH(p.mesh.position.z) + foot, p.mesh.position.z + fz * dist);
+        p.stroller.position.set(p.mesh.position.x + fx * dist, pedGroundH(p.mesh.position.z) + foot + STROLLER_YOFF, p.mesh.position.z + fz * dist);
         p.stroller.rotation.y = rot + STROLLER_YAW;
       }
     }
