@@ -785,7 +785,7 @@
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.center.set(0.5, 0.5); return t;
   }
   // proportions calibrées (unités locales du modèle, centre = 0 ; hauteur ~1.11)
-  const FW = { BASIN_Y: -0.06, BASIN_R: 0.58, BOWL_Y: 0.30, BOWL_R: 0.23, SPOUT_Y: 0.34, JT_R: 0.30, JT_Y: 0.24, LAND_R: 0.46 };
+  const FW = { BASIN_Y: -0.10, BASIN_IN: 0.34, BASIN_R: 0.72, BOWL_Y: 0.28, BOWL_R: 0.24, SPOUT_Y: 0.32, JT_R: 0.30, JT_Y: 0.22, LAND_R: 0.55 };
   function buildFountainWater(m, s) {
     const grp = new THREE.Group(); grp.name = 'WATER'; const jets = [], ripples = [];
     const dropMat = new THREE.PointsMaterial({ map: _dropTex, size: 0.085 * s, transparent: true, depthWrite: false, opacity: 0.95, blending: THREE.AdditiveBlending, sizeAttenuation: true, color: 0xbfefff });
@@ -795,9 +795,9 @@
     const cGeo = new THREE.BufferGeometry(); cGeo.setAttribute('position', new THREE.BufferAttribute(cPos, 3));
     const cPts = new THREE.Points(cGeo, dropMat); cPts.frustumCulled = false; grp.add(cPts);
     jets.push({ type: 'c', pos: cPos, ph: cPh, geo: cGeo });
-    // 4 cascades latérales = RUBANS épais (plusieurs brins côte à côte)
-    for (let k = 0; k < 4; k++) {
-      const ang = k * Math.PI / 2 + Math.PI / 4, strands = 5, perStrand = 8, sN = strands * perStrand;
+    // 8 cascades latérales = RUBANS épais (plusieurs brins) tout autour → masquent les jets figés
+    for (let k = 0; k < 8; k++) {
+      const ang = k * Math.PI / 4, strands = 4, perStrand = 8, sN = strands * perStrand;
       const pos = new Float32Array(sN * 3), ph = new Float32Array(sN), off = new Float32Array(sN);
       let idx = 0;
       for (let a = 0; a < strands; a++) for (let b = 0; b < perStrand; b++) { ph[idx] = b / perStrand + a * 0.015; off[idx] = (a - (strands - 1) / 2) / (strands - 1); idx++; }
@@ -805,10 +805,14 @@
       const pts = new THREE.Points(geo, dropMat); pts.frustumCulled = false; grp.add(pts);
       jets.push({ type: 's', ang: ang, pos: pos, ph: ph, off: off, geo: geo });
     }
-    // ondulations (2 disques miroitants)
-    for (const r of [{ R: FW.BASIN_R, Y: FW.BASIN_Y, seg: 40 }, { R: FW.BOWL_R, Y: FW.BOWL_Y, seg: 28 }]) {
-      const mat = new THREE.MeshBasicMaterial({ map: makeRippleTex(), transparent: true, opacity: 0.32, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-      const d = new THREE.Mesh(new THREE.CircleGeometry(r.R, r.seg), mat); d.rotation.x = -Math.PI / 2; d.position.y = r.Y + 0.008; grp.add(d);
+    // ondulations : ANNEAU pour le bassin (couvre toute l'eau, pas le pilier) + disque pour la vasque haute
+    const rings = [
+      { geo: new THREE.RingGeometry(FW.BASIN_IN, FW.BASIN_R, 48), Y: FW.BASIN_Y },
+      { geo: new THREE.CircleGeometry(FW.BOWL_R, 28), Y: FW.BOWL_Y }
+    ];
+    for (const r of rings) {
+      const mat = new THREE.MeshBasicMaterial({ map: makeRippleTex(), transparent: true, opacity: 0.4, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      const d = new THREE.Mesh(r.geo, mat); d.rotation.x = -Math.PI / 2; d.position.y = r.Y + 0.008; grp.add(d);
       ripples.push(d);
     }
     m.add(grp);
