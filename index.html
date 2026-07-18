@@ -728,7 +728,7 @@
     assetBase.car = base;                                // palette (pristine) → tu règles la taille toi-même
     carBaseBox = new THREE.Box3().setFromObject(base);   // bbox à l'échelle 1
     for (let i = 0; i < 4; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); cars.push({ mesh: m }); }
-    setTrafficScale(EDIT_TYPES.car.s);                   // taille initiale
+    setTrafficScale(trafficScale);                       // taille initiale (0.85, ou celle chargée)
     for (let i = 0; i < cars.length; i++) respawnCar(cars[i], hero.position.x + 12 + i * 16);
   });
   // Fumée d'échappement = PARTICULES douces (billboards avec dégradé radial)
@@ -737,7 +737,7 @@
     const gr = sx.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(225,227,230,0.95)'); gr.addColorStop(0.45, 'rgba(205,208,213,0.4)'); gr.addColorStop(1, 'rgba(205,208,213,0)');
     sx.fillStyle = gr; sx.fillRect(0, 0, 64, 64);
     const smokeTex = new THREE.CanvasTexture(sc);
-    for (let i = 0; i < 70; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0, depthWrite: false, color: 0xd0d4d8 })); s.visible = false; s.userData = { life: 0, vx: 0, vy: 0, vz: 0 }; scene.add(s); smoke.push(s); } }
+    for (let i = 0; i < 120; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0, depthWrite: false, color: 0xd0d4d8 })); s.visible = false; s.userData = { life: 0, vx: 0, vy: 0, vz: 0 }; scene.add(s); smoke.push(s); } }
   let smokeIdx = 0, smokeT = 0;
 
   // --- Arbres low-poly (Poly Pizza) plantés ---
@@ -1119,7 +1119,6 @@
     windmill: { label: '🌬️ Moulin',         s: 2.8 },
     windmill2:{ label: '🌀 Moulin animé',   s: 2.8 },
     lamp:     { label: '🏮 Lampadaire',      s: 1.6 },
-    car:      { label: '🚗 Voiture (taille)', s: 0.85 },
     carrot:   { label: '🥕 Maison carotte', s: 3.2 },
     cottage:  { label: '🏠 Chaumière',      s: 2.2 },
     mushroom: { label: '🍄 Champignon',     s: 0.32 },
@@ -1168,33 +1167,37 @@
   function editDelete() { if (!EDIT.sel) return; scene.remove(EDIT.sel.mesh); EDIT.placed = EDIT.placed.filter(r => r !== EDIT.sel); EDIT.sel = null; if (editRing) editRing.visible = false; editSave(); }
   function editSerialize() { return EDIT.placed.map(r => ({ type: r.type, x: +r.mesh.position.x.toFixed(2), z: +r.mesh.position.z.toFixed(2), rotY: +r.mesh.rotation.y.toFixed(3), scale: +r.scale.toFixed(3) })); }
   function editSave() {
-    const data = editSerialize();
+    const data = { objects: editSerialize(), carScale: trafficScale };   // + la taille des voitures du trafic
     try { localStorage.setItem('wispy_layout', JSON.stringify(data)); } catch (e) {}
     fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1', { method: 'PATCH', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ data }) }).catch(() => {});
   }
 
-  // charge un layout (retry tant que les modèles ne sont pas prêts)
+  // charge un layout (retry tant que les modèles ne sont pas prêts) — ignore les anciennes voitures posées
   function editApplyLayout(layout) {
     if (!layout || !layout.length) return;
     const done = layout.map(() => false);
     (function attempt() {
       let all = true;
-      layout.forEach((d, i) => { if (!done[i]) { if (assetBase[d.type]) { editSpawn(d.type, d.x, d.z, d.rotY, d.scale, false); done[i] = true; } else all = false; } });
+      layout.forEach((d, i) => { if (!done[i]) { if (d.type === 'car') { done[i] = true; return; } if (assetBase[d.type]) { editSpawn(d.type, d.x, d.z, d.rotY, d.scale, false); done[i] = true; } else all = false; } });
       if (!all) setTimeout(attempt, 700);
     })();
   }
+  function applyCarScale(s) { const go = () => { if (carBaseBox) setTrafficScale(s); else setTimeout(go, 400); }; go(); }   // attend le chargement de la voiture
   // au démarrage : Supabase d'abord (partagé), sinon localStorage
   (async () => {
-    let layout = null;
-    try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); layout = j && j[0] && j[0].data; } } catch (e) {}
-    if (!layout) { try { layout = JSON.parse(localStorage.getItem('wispy_layout') || 'null'); } catch (e) {} }
-    editApplyLayout(layout);
+    let raw = null;
+    try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); raw = j && j[0] && j[0].data; } } catch (e) {}
+    if (!raw) { try { raw = JSON.parse(localStorage.getItem('wispy_layout') || 'null'); } catch (e) {} }
+    let objects = raw, carScale = null;
+    if (raw && !Array.isArray(raw)) { objects = raw.objects; carScale = raw.carScale; }   // nouveau format {objects, carScale}
+    if (carScale) applyCarScale(carScale);
+    editApplyLayout(objects);
   })();
 
   // --- Interface éditeur ---
   const edPanel = document.createElement('div');
   edPanel.style.cssText = 'position:fixed;top:64px;left:12px;z-index:50;background:rgba(12,22,42,.92);border:2px solid #6fd;border-radius:12px;padding:10px;color:#dff;font:13px sans-serif;display:none;max-width:210px;';
-  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>WASD</b> (maintenir) = se déplacer vite · <b>clic-milieu</b> glisser = déplacer la vue · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer.<br>Objet sélectionné : <b>◄ ►</b> = tourner (2 sens) · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
+  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>WASD</b> (maintenir) = se déplacer vite · <b>clic-milieu</b> glisser = déplacer la vue · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer.<br>Objet sélectionné : <b>◄ ►</b> = tourner (2 sens) · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;">🚗 Taille voitures :<button id="edCarM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edCarP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
   document.body.appendChild(edPanel);
   const edPal = edPanel.querySelector('#edPal');
   function edHighlight() { [...edPal.children].forEach(c => c.style.background = c.dataset.t === EDIT.type ? '#36e0d0' : 'rgba(50,80,120,.5)'); }
@@ -1205,6 +1208,8 @@
     edPal.appendChild(b);
   }
   edHighlight();
+  edPanel.querySelector('#edCarM').onclick = () => { setTrafficScale(Math.max(0.3, trafficScale * 0.9)); editSave(); };
+  edPanel.querySelector('#edCarP').onclick = () => { setTrafficScale(Math.min(3.5, trafficScale * 1.1)); editSave(); };
   edPanel.querySelector('#edDel').onclick = () => editDelete();
   edPanel.querySelector('#edExport').onclick = () => { const s = JSON.stringify(editSerialize()); if (navigator.clipboard) navigator.clipboard.writeText(s); window.prompt('Placement (copié) :', s); };
 
@@ -1283,8 +1288,6 @@
   renderer.setAnimationLoop((time) => {
     const dt = prevFrameT ? Math.min(0.05, (time - prevFrameT) / 1000) : 0.016; prevFrameT = time;
     for (const rec of EDIT.placed) if (rec.blades) rec.blades.rotation.z += dt * 1.2;   // pales des moulins tournent
-    // la taille du trafic suit la voiture d'éditeur (sélectionnée en priorité) — même en mode éditeur
-    { const refCar = (EDIT.sel && EDIT.sel.type === 'car') ? EDIT.sel : EDIT.placed.find(r => r.type === 'car'); if (refCar && carBaseBox && Math.abs(refCar.scale - trafficScale) > 0.001) setTrafficScale(refCar.scale); }
     if (EDIT.on && !presenting) {                     // MODE ÉDITEUR : jeu gelé, caméra libre
       updateEditorCam(dt);
       if (grassWind) grassWind.value = time * 0.001;
@@ -1435,15 +1438,15 @@
       if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-11, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
       // FUMÉE d'échappement (particules douces qui sortent du pot, montent, s'étalent et s'effacent)
       smokeT += dt;
-      if (smokeT > 0.035 && cars.length) {
+      if (smokeT > 0.02 && cars.length) {
         smokeT = 0;
         const c = cars[(Math.random() * cars.length) | 0];
-        for (let k = 0; k < 2; k++) {
+        for (let k = 0; k < 3; k++) {
           const p = smoke[smokeIdx]; smokeIdx = (smokeIdx + 1) % smoke.length;
-          p.position.set(c.mesh.position.x + carHalfX * 0.85 + (Math.random() - 0.5) * 0.1, carGroundY * 0.45 + Math.random() * 0.08, c.mesh.position.z + (Math.random() - 0.5) * 0.22);
-          p.visible = true; p.userData.life = 0.7 + Math.random() * 0.5;
-          p.userData.vx = 0.4 + Math.random() * 0.4; p.userData.vy = 0.35 + Math.random() * 0.4; p.userData.vz = (Math.random() - 0.5) * 0.3;
-          p.scale.setScalar(0.05 + Math.random() * 0.05); p.material.opacity = 0.3 + Math.random() * 0.18;
+          p.position.set(c.mesh.position.x + carHalfX * 0.85 + (Math.random() - 0.5) * 0.12, carGroundY * 0.5 + Math.random() * 0.12, c.mesh.position.z + (Math.random() - 0.5) * 0.28);
+          p.visible = true; p.userData.life = 0.9 + Math.random() * 0.6;
+          p.userData.vx = 0.4 + Math.random() * 0.5; p.userData.vy = 0.45 + Math.random() * 0.5; p.userData.vz = (Math.random() - 0.5) * 0.35;
+          p.scale.setScalar(0.1 + Math.random() * 0.08); p.material.opacity = 0.45 + Math.random() * 0.22;
         }
       }
       for (const p of smoke) {
@@ -1452,8 +1455,8 @@
         if (p.userData.life <= 0) { p.visible = false; continue; }
         p.position.x += p.userData.vx * dt; p.position.y += p.userData.vy * dt; p.position.z += p.userData.vz * dt;
         p.userData.vy *= 0.985;
-        p.scale.setScalar(p.scale.x + dt * 0.45);           // s'étale doucement
-        p.material.opacity = Math.max(0, p.material.opacity - dt * 0.55);
+        p.scale.setScalar(p.scale.x + dt * 0.6);            // s'étale
+        p.material.opacity = Math.max(0, p.material.opacity - dt * 0.42);
       }
     }
     // cristaux : rotation + flottement + COLLECTE (par le PERSO)
