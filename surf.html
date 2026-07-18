@@ -1549,7 +1549,7 @@
   // SURF : lit UNIQUEMENT Supabase (source de vérité partagée PC→casque). Pas de localStorage → jamais de vieille version cachée sur le casque.
   (async () => {
     let sbRaw = null;
-    try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data&t=' + Date.now(), { cache: 'no-store', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); sbRaw = j && j[0] && j[0].data; } } catch (e) {}
+    try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data', { cache: 'no-store', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); sbRaw = j && j[0] && j[0].data; } } catch (e) {}
     const S = extractLayout(sbRaw);
     let objects = S.objects, carScale = S.carScale, pedScl = S.pedScale, strScl = S.strollerScale, busScl = S.busScale;
     if (carScale != null) applyCarScale(carScale);
