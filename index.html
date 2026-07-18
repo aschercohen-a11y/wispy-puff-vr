@@ -179,6 +179,8 @@
   const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
   const HERO_RADIUS = 0.28;                   // rayon de collision du perso
   let heroFallT = 0, heroFallVX = 0, heroFallVZ = 0;   // chute : timer + élan « de l'autre côté »
+  let heroDeadT = 0;                          // >0 = mort (voiture) → respawn au départ à la fin
+  let heroJumps = 0, heroPrevY = 0, heroCar = null;   // double saut · y précédent · voiture sous les pieds
   const walkPlatforms = [];                   // {x0,x1,z0,z1,h} : surfaces surélevées marchables (trottoirs)
   const barriers = [];                        // barrières rouges/blanches à sauter (sur la route)
   const assetBase = {};                       // modèles de base pour l'ÉDITEUR (peuplé au chargement)
@@ -190,7 +192,11 @@
   const ROAD = { z: 0, len: 58, w: 6, sideW: 2.2, sideH: 0.22 };   // chaussée DOUBLÉE (w 3→6), trottoirs inchangés
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
-  function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
+  function tryJump() {
+    if (heroFallT > 0 || heroDeadT > 0) return;
+    if (heroOnGround) { heroVelY = HERO_JUMP; heroOnGround = false; heroJumps = 1; }        // 1er saut
+    else if (heroJumps < 2) { heroVelY = HERO_JUMP; heroJumps = 2; }                        // DOUBLE saut (en l'air)
+  }
 
   // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
   let camYaw = Math.PI / 2 + Math.PI, camPitch = 0.42;   // caméra derrière le perso (qui regarde +X / la route)
@@ -697,6 +703,29 @@
     assetBase.barrier = base;                          // dispo dans l'éditeur (à poser toi-même)
   });
 
+  // ============================================================
+  //  TRAFIC : voitures qui FONCENT vers le joueur (à esquiver) — voie gauche/droite au hasard, collision = MORT
+  // ============================================================
+  const cars = [];
+  const CAR_LANES = [-1.5, 1.5];                       // centres des 2 voies (route w=6)
+  const CAR_MODEL_YAW = Math.PI;                       // orientation du modèle pour regarder -X (vers le joueur) — à régler
+  let carGroundY = 0, carHalfX = 1, carHalfZ = 0.5, carTop = 1;
+  function respawnCar(car, x) {
+    car.lane = Math.random() < 0.5 ? 0 : 1;
+    car.mesh.position.set(x != null ? x : (hero.position.x + 26 + Math.random() * 34), carGroundY, CAR_LANES[car.lane]);
+    car.speed = 5 + Math.random() * 4;
+  }
+  new GLTFLoader().load('models/car.glb', function (gltf) {
+    const base = gltf.scene; dside(base); base.scale.setScalar(0.85);
+    const bb = new THREE.Box3().setFromObject(base);
+    carGroundY = -bb.min.y; carHalfX = (bb.max.x - bb.min.x) / 2; carHalfZ = (bb.max.z - bb.min.z) / 2; carTop = bb.max.y - bb.min.y;
+    for (let i = 0; i < 4; i++) {
+      const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m);
+      const car = { mesh: m }; cars.push(car);
+      respawnCar(car, hero.position.x + 12 + i * 16);   // étalées devant au départ
+    }
+  });
+
   // --- Arbres low-poly (Poly Pizza) plantés ---
   new GLTFLoader().load('models/pp_tree.glb', function (gltf) {
     const base = gltf.scene;
@@ -1054,7 +1083,7 @@
       if (_fwd.lengthSq() < 1e-4) _fwd.set(0, 0, -1);
       _fwd.normalize();
       _rightv.crossVectors(_fwd, _up).normalize();                // droite par rapport à ta vue
-      heroMoving = Math.hypot(lx, ly) > 0.15 && heroFallT <= 0;    // bloqué pendant la chute
+      heroMoving = Math.hypot(lx, ly) > 0.15 && heroFallT <= 0 && heroDeadT <= 0;   // bloqué pendant chute/mort
       if (heroMoving) {
         hero.position.addScaledVector(_fwd, -ly * HERO_SPEED * dt);   // avant = où tu regardes
         hero.position.addScaledVector(_rightv, lx * HERO_SPEED * dt); // strafe G/D relatif à ta vue
@@ -1253,7 +1282,7 @@
       let mx = joyX, my = joyY;
       if (kW) my -= 1; if (kS) my += 1; if (kA) mx -= 1; if (kD) mx += 1;   // clavier PC
       const mag = Math.hypot(mx, my);
-      heroMoving = mag > 0.05 && heroFallT <= 0;                            // bloqué pendant la chute
+      heroMoving = mag > 0.05 && heroFallT <= 0 && heroDeadT <= 0;          // bloqué pendant chute/mort
       if (heroMoving) {
         if (mag > 1) { mx /= mag; my /= mag; }
         const fwdX = -Math.sin(camYaw), fwdZ = -Math.cos(camYaw);   // avant = s'éloigner de la caméra
@@ -1271,13 +1300,13 @@
     }
     // GRAVITÉ + SAUT du perso (commun PC/mobile/VR) + limite du jardin
     {
-      const prevY = hero.position.y;
+      const prevY = hero.position.y; heroPrevY = prevY;               // y avant gravité (pour atterrir sur toits)
       heroVelY -= HERO_GRAVITY * dt;
       hero.position.y += heroVelY * dt;
       heroOnGround = false;
       let groundH = 0;                                                 // hauteur du sol (0, ou trottoir surélevé)
       for (const pf of walkPlatforms) if (hero.position.x >= pf.x0 && hero.position.x <= pf.x1 && hero.position.z >= pf.z0 && hero.position.z <= pf.z1) groundH = Math.max(groundH, pf.h);
-      if (hero.position.y <= groundH) { hero.position.y = groundH; heroVelY = 0; heroOnGround = true; }
+      if (hero.position.y <= groundH) { hero.position.y = groundH; heroVelY = 0; heroOnGround = true; heroJumps = 0; }
       const hpr = Math.hypot(hero.position.x, hero.position.z);
       if (hpr > HERO_CLAMP) { hero.position.x *= HERO_CLAMP / hpr; hero.position.z *= HERO_CLAMP / hpr; }
       // CHAMPIGNONS = obstacles-plateformes : on peut MONTER dessus, on ne peut pas les TRAVERSER ;
@@ -1342,7 +1371,7 @@
       }
       // ANIMATION : Fall (tombé) > Jump (en l'air) > Walking (bouge) > Idle (arrêt) — fondus doux
       if (heroMixer) {
-        const airborne = !heroOnGround, falling = heroFallT > 0;
+        const airborne = !heroOnGround, falling = heroFallT > 0 || heroDeadT > 0;
         if (airborne && !heroWasAir && jumpAction) jumpAction.reset();   // relance le saut au décollage
         heroWasAir = airborne;
         const fT = falling ? 1 : 0;
@@ -1366,6 +1395,26 @@
     }
     if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
+    // ============================================================
+    //  TRAFIC : voitures foncent vers le joueur (-X). TOIT = plateforme (sauter dessus = OK). Côté/avant = MORT.
+    // ============================================================
+    {
+      heroCar = null;
+      for (const car of cars) {
+        car.mesh.position.x -= car.speed * dt;                                   // avance vers le joueur
+        if (car.mesh.position.x < hero.position.x - 14) { respawnCar(car); continue; }   // dépassé → réapparaît devant
+        const dxc = hero.position.x - car.mesh.position.x, dzc = hero.position.z - car.mesh.position.z;
+        if (Math.abs(dxc) < carHalfX + HERO_RADIUS && Math.abs(dzc) < carHalfZ + HERO_RADIUS) {   // dans l'empreinte
+          if (heroDeadT <= 0 && heroVelY <= 0 && heroPrevY >= carTop - 0.18 && hero.position.y <= carTop + 0.05) {
+            hero.position.y = carTop; heroVelY = 0; heroOnGround = true; heroJumps = 0; heroCar = car;   // ATTERRIT sur le TOIT
+          } else if (heroDeadT <= 0 && heroFallT <= 0 && hero.position.y < carTop - 0.18) {
+            heroDeadT = 1.9; if (fallAction) fallAction.reset();                  // PERCUTÉ → MORT
+          }
+        }
+      }
+      if (heroCar) hero.position.x -= heroCar.speed * dt;                         // porté par la voiture (elle glisse sous lui)
+      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-11, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
+    }
     // cristaux : rotation + flottement + COLLECTE (par le PERSO)
     _chest.set(hero.position.x, hero.position.y + 0.5, hero.position.z);   // corps du perso
     for (const c of crystals) {
