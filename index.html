@@ -515,14 +515,14 @@
     obstacles.push({ pos: new THREE.Vector3(-6, 1.4, -6), r: 4.2 });   // la maison fait éclater la bulle
   });
 
-  // --- Maison-carotte (générée par IA depuis la photo, texturée) ---
-  new GLTFLoader().load('models/carrot_ai.glb?v=1', function (gltf) {
+  // --- Maison-carotte (Meshy AI depuis la photo, texturée HD, optimisée pour le Quest) ---
+  new GLTFLoader().load('models/carrot_meshy.glb?v=1', function (gltf) {
     const c = gltf.scene;
     const off = groundOffset(c);
-    const s = 6;                                     // le modèle IA est normalisé (~1u) → agrandi
+    const s = 3.2;                                   // modèle Meshy ~1.9u de haut → ~6u dans le jardin
     c.scale.setScalar(s);
     c.position.set(7, off * s, 6);
-    c.rotation.y = Math.PI;                          // porte vers le centre (à ajuster)
+    c.rotation.y = Math.PI;                          // porte vers le centre (à ajuster dans le casque)
     scene.add(c);
     obstacles.push({ pos: new THREE.Vector3(7, 1.4, 6), r: 2.5 });     // fait éclater la bulle
   });
