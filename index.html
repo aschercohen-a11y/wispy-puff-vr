@@ -175,7 +175,7 @@
 
   // physique + réglages du perso
   let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
-  const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 14;
+  const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 29;   // plateau agrandi
   const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
   const HERO_RADIUS = 0.28;                   // rayon de collision du perso
   let heroFallT = 0, heroFallVX = 0, heroFallVZ = 0;   // chute : timer + élan « de l'autre côté »
@@ -187,7 +187,7 @@
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
-  const ROAD = { z: 0, len: 28, w: 3, sideW: 2.2, sideH: 0.22 };   // route le long de l'axe X (trottoirs larges + surélevés)
+  const ROAD = { z: 0, len: 58, w: 3, sideW: 2.2, sideH: 0.22 };   // route CONTINUE d'un bout à l'autre du plateau (axe X)
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
   function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
@@ -413,10 +413,10 @@
       x.fillRect(Math.random()*s, Math.random()*s, 1.5, 2 + Math.random()*3);
     }
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(14, 14);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(28, 28);
     return t;
   }
-  const GARDEN_R = 15;                                            // rayon du jardin
+  const GARDEN_R = 30;                                            // rayon du jardin (plateau agrandi ×2)
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(GARDEN_R, 64),
     new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 1, metalness: 0 })
@@ -451,7 +451,7 @@
       );
     };
 
-    const COUNT = 5000;
+    const COUNT = 11000;                                // plateau ×2 → plus de brins pour garder la densité
     const grass = new THREE.InstancedMesh(bg, gm, COUNT);
     const d = new THREE.Object3D();
     for (let i = 0; i < COUNT; i++) {
@@ -474,8 +474,8 @@
   const BOUND_R = GARDEN_R - 1.5;
   const bushGeo = new THREE.IcosahedronGeometry(0.6, 1);
   const bushMat = new THREE.MeshStandardMaterial({ color: 0x2b6b3a, roughness: 1, flatShading: true });
-  for (let i = 0; i < 46; i++) {
-    const a = (i / 46) * Math.PI * 2;
+  for (let i = 0; i < 92; i++) {
+    const a = (i / 92) * Math.PI * 2;
     const b = new THREE.Mesh(bushGeo, bushMat);
     b.position.set(Math.cos(a) * GARDEN_R * 0.98, 0.35, Math.sin(a) * GARDEN_R * 0.98);
     b.scale.setScalar(0.7 + Math.random() * 0.9);
