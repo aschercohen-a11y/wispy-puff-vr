@@ -940,7 +940,7 @@
     return { x: best.mesh.position.x, halfW: (bb.max.x - bb.min.x) / 2 };   // demi-largeur des bandes le long de la route
   }
   // pose "pousser" des bras (delta appliqué par-dessus la pose de repos) — ajustable
-  const ARM_POSE = { LeftArm: [0, 0, -1.25], RightArm: [0, 0, 1.25], LeftForeArm: [0, 0, -0.35], RightForeArm: [0, 0, 0.35] };
+  const ARM_POSE = { LeftArm: [0, 0, 1.25], RightArm: [0, 0, -1.25], LeftForeArm: [0, 0, 0.35], RightForeArm: [0, 0, -0.35] };
   const STROLLER_DIST = 0.42, STROLLER_H = 0.5, STROLLER_YAW = 0;
   const _q = new THREE.Quaternion(), _e = new THREE.Euler();
   function spawnPed(url, startX, startSide, opts) {
