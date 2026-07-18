@@ -224,6 +224,7 @@
   let decorSpan = 116, decorReady = false;
   const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
   const HERO_RADIUS = 0.28;                   // rayon de collision du perso
+  let heroInvuln = 0;                          // invincibilité (secondes) après un respawn
   let heroFallT = 0, heroFallVX = 0, heroFallVZ = 0;   // chute : timer + élan « de l'autre côté »
   let heroDeadT = 0;                          // >0 = mort (voiture) → respawn au départ à la fin
   let heroJumps = 0, heroPrevY = 0, heroCar = null;   // double saut · y précédent · voiture sous les pieds
@@ -932,10 +933,10 @@
   function setBusScale(s) { busScale = s; for (const v of cars) if (v.kind === 'bus' && v.box) { v.scale = s; vehDims(v); } }
   function respawnCar(v, x) {
     v.lane = (Math.random() * CAR_LANES.length) | 0;
-    let px = x != null ? x : (hero.position.x + 30 + Math.random() * 40);
+    let px = x != null ? x : (hero.position.x + 80 + Math.random() * 70);   // APPARAÎT DE LOIN (émerge du brouillard) puis vient vers toi
     for (const o of cars) { const gap = Math.max(v.minGap || 5, o.minGap || 5); if (o !== v && o.lane === v.lane && Math.abs(o.mesh.position.x - px) < gap) px = o.mesh.position.x + gap + Math.random() * 12; }   // jamais coller deux véhicules
     v.mesh.position.set(px, v.groundY, CAR_LANES[v.lane]);
-    v.speed = 5 + Math.random() * 4;
+    v.speed = 3 + Math.random() * 3;                          // plus lentes → fermeture plus juste, on a le temps de réagir
   }
   new GLTFLoader().load('models/car.glb', function (gltf) {
     const base = gltf.scene; dside(base);
@@ -1701,7 +1702,8 @@
       if (laneCd <= 0 && Math.abs(runLat) > 0.55) { setLane(runLat > 0 ? 1 : -1); laneCd = 0.28; }   // stick = changement de voie net
       runSpeed = Math.min(15, runSpeed + dt * 0.2);                // accélère doucement
       hero.position.x += runSpeed * dt;                            // AVANCE tout seul
-      hero.position.z += (LANES[heroLane] - hero.position.z) * Math.min(1, dt * 14);   // glisse vers la voie
+      hero.position.z += (LANES[heroLane] - hero.position.z) * Math.min(1, dt * 24);   // change de voie VITE (moins de clip)
+      if (heroMesh) heroMesh.visible = heroInvuln <= 0 || (Math.floor(heroInvuln * 8) % 2 === 0);   // clignote quand invincible
       hero.rotation.y = Math.PI / 2;                               // toujours face à la route (+X)
       heroMoving = !heroCar;                                       // anim course (sauf porté par un véhicule)
       // ===== DÉFILEMENT INFINI (treadmill) : le sol suit le perso, le décor se recycle =====
@@ -1829,18 +1831,23 @@
         car.mesh.position.x = nx;
         if (car.mesh.position.x < hero.position.x - 14) { respawnCar(car); continue; }   // dépassé → réapparaît devant
         const dxc = hero.position.x - car.mesh.position.x, dzc = hero.position.z - car.mesh.position.z;
-        if (Math.abs(dxc) < car.halfX + HERO_RADIUS && Math.abs(dzc) < car.halfZ + HERO_RADIUS) {   // dans l'empreinte
+        if (Math.abs(dxc) < car.halfX * 0.9 + HERO_RADIUS && Math.abs(dzc) < car.halfZ * 0.85 + HERO_RADIUS) {   // empreinte resserrée (écarts passables)
           if (heroDeadT <= 0 && heroVelY <= 0 && heroPrevY >= car.top - 0.18 && hero.position.y <= car.top + 0.05) {
             hero.position.y = car.top; heroVelY = 0; heroOnGround = true; heroJumps = 0; heroCar = car;   // ATTERRIT sur le TOIT (voiture OU bus)
-          } else if (heroDeadT <= 0 && heroFallT <= 0 && hero.position.y < car.top - 0.18) {
-            heroDeadT = 1.9; if (fallAction) fallAction.reset();                  // PERCUTÉ → MORT
+          } else if (heroDeadT <= 0 && heroFallT <= 0 && heroInvuln <= 0 && hero.position.y < car.top - 0.18) {
+            heroDeadT = 1.9; if (fallAction) fallAction.reset();                  // PERCUTÉ → MORT (sauf invincible)
           }
         }
       }
       // ANTI-EMPILEMENT : jamais deux voitures collées dans la même voie
       for (const a of cars) for (const b of cars) { if (a !== b && a.lane === b.lane) { const mg = Math.max(a.minGap || 5, b.minGap || 5), gap = a.mesh.position.x - b.mesh.position.x; if (gap > 0 && gap < mg) a.mesh.position.x = b.mesh.position.x + mg; } }
       if (heroCar) hero.position.x -= heroCar.speed * dt;                         // porté par la voiture (elle glisse sous lui)
-      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-52, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; heroLane = 1; runSpeed = 7; } }   // respawn au départ (voie centre, vitesse reset)
+      if (heroInvuln > 0) heroInvuln -= dt;                                       // décompte de l'invincibilité
+      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) {                 // RESPAWN SUR PLACE (les pièces continuent d'arriver)
+        hero.position.set(hero.position.x, 0, LANES[1]); hero.rotation.y = Math.PI / 2;
+        heroVelY = 0; heroFallT = 0; heroLane = 1; runSpeed = 7; heroInvuln = 3;  // 3s d'invincibilité
+        for (let i = 0; i < cars.length; i++) respawnCar(cars[i], hero.position.x + 50 + i * 16);   // trafic ré-étalé devant (pas de trou de 20s)
+      } }
       // FUMÉE d'échappement (particules douces qui sortent du pot, montent, s'étalent et s'effacent)
       smokeT += dt;
       if (smokeT > 0.02 && cars.length) {
