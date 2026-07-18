@@ -786,6 +786,18 @@
     assetBase.paving = grp;                                                                   // dispo dans l'éditeur
   }
 
+  // --- PASSAGE PIÉTON (procédural) : bandes blanches type zébra, à poser en travers de la route ---
+  {
+    const grp = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0xefe9da, roughness: 1, metalness: 0 });
+    const bars = 6, barW = 0.5, gap = 0.4, step = barW + gap, len = 3.2, total = (bars - 1) * step;
+    for (let i = 0; i < bars; i++) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(barW, 0.05, len), mat);
+      b.position.set(-total / 2 + i * step, 0.025, 0); grp.add(b);
+    }
+    assetBase.crosswalk = grp;                                                                // dispo dans l'éditeur
+  }
+
   // --- FONTAINE : modèle pierre (Meshy) + EAU ANIMÉE par-dessus (jet central + 4 cascades + ondulations) ---
   const _dropTex = (function () {
     const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d');
@@ -1287,6 +1299,7 @@
     barrier:  { label: '🚧 Barrière',       s: 1.0 },
     path:     { label: '🚪 Allée / entrée', s: 1.0 },
     paving:   { label: '🧱 Dalle (sol)',     s: 1.0 },
+    crosswalk:{ label: '🦓 Passage piéton',  s: 1.0 },
     fountain: { label: '⛲ Fontaine',        s: 2.2 },
   };
   const _eray = new THREE.Raycaster(), _emouse = new THREE.Vector2(), _eplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _ehit = new THREE.Vector3();
