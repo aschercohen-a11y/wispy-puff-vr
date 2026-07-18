@@ -1,0 +1,1986 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Wispy Puff VR — Étape 0</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; background:#05070f; overflow:hidden; font-family:'Trebuchet MS','Segoe UI',sans-serif; color:#dbe6ff; }
+
+  /* Le jeu 2D tourne dans ce canvas, mais on le cache hors écran :
+     three.js le récupère comme texture. Le canvas continue de se dessiner même hors-vue. */
+  #wrap { position:fixed; left:-99999px; top:0; }
+
+  /* Petit bandeau d'info visible sur le bureau (pas dans le casque) */
+  #info {
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    padding:12px 16px; text-align:center; font-size:14px;
+    background:linear-gradient(180deg,rgba(10,16,40,0),rgba(10,16,40,.85));
+    color:#9fb6e6; pointer-events:none;
+  }
+  #info b { color:#cfe4ff; }
+  /* Le bouton "ENTER VR" de three.js est stylé par la lib ; on le laisse tel quel. */
+</style>
+
+<!-- three.js en local (aucune dépendance internet) -->
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+
+<!-- ================================================================
+     1) DOM attendu par game.js (canvas + overlays).
+        Repris à l'identique de l'index d'origine, mais placé hors écran.
+        game.js appelle el('menu'), el('hud')… : ces éléments DOIVENT exister.
+     ================================================================ -->
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="hidden">
+    <span>Niveau <b id="hud-level">1</b></span>
+    <span>Bulles <b id="hud-lives">3</b></span>
+    <span>Score <b id="hud-score">0</b></span>
+    <span>Temps <b id="hud-time">0s</b></span>
+  </div>
+
+  <div id="menu" class="overlay">
+    <img id="btn-start" src="assets/boutonPlay.png" alt="start" />
+    <div id="lvlbtns"></div>
+    <button id="btn-editor">editor</button>
+  </div>
+  <div id="levelclear" class="overlay hidden"><button id="btn-next">next</button></div>
+  <div id="gameover" class="overlay hidden"><button id="btn-retry">retry</button></div>
+  <div id="victory" class="overlay hidden"><button id="btn-replay">replay</button></div>
+</div>
+
+<!-- Écran de chargement (masque la scène tant que les modèles ne sont pas prêts) -->
+<div id="loadingScreen" style="position:fixed;inset:0;z-index:200;background:linear-gradient(160deg,#7ec3f0,#a9e0c0);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Trebuchet MS',sans-serif;color:#fff;transition:opacity .6s;">
+  <div style="font-size:36px;font-weight:bold;text-shadow:0 2px 8px rgba(0,0,0,.25);margin-bottom:6px;">🧡 Wispy Puff</div>
+  <div style="font-size:15px;opacity:.92;margin-bottom:24px;">Préparation du village…</div>
+  <div style="width:270px;height:16px;background:rgba(255,255,255,.28);border-radius:10px;overflow:hidden;box-shadow:inset 0 2px 6px rgba(0,0,0,.22);">
+    <div id="loadingBar" style="width:0%;height:100%;background:linear-gradient(90deg,#ffd15c,#ff8fc7);border-radius:10px;transition:width .3s;"></div>
+  </div>
+  <div id="loadingPct" style="font-size:13px;margin-top:10px;opacity:.85;">0%</div>
+</div>
+
+<div id="info">🧡 Wispy Puff — dirige le personnage ! <b>PC :</b> joystick (bas-gauche) ou <b>WASD</b> = marcher · <b>glisser la souris</b> = tourner la caméra · <b>Espace</b> ou ⤒ = sauter · attrape les diamants et les pièces d'or ! <b>Mobile :</b> joystick + bouton saut. <b>Casque :</b> ENTER VR (stick = marcher, A/B = saut).</div>
+
+<!-- Musique de fond + bouton on/off -->
+<audio id="bgm" src="audio/musique.mp3?v=1" loop preload="auto"></audio>
+<button id="btnMusic" title="Musique" style="position:fixed;top:12px;right:12px;z-index:50;width:48px;height:48px;border:none;border-radius:50%;background:rgba(20,20,40,0.55);color:#fff;font-size:22px;cursor:pointer;backdrop-filter:blur(4px);box-shadow:0 2px 8px rgba(0,0,0,0.3)">🎵</button>
+<script>
+  (function () {
+    var bgm = document.getElementById('bgm'), btn = document.getElementById('btnMusic');
+    bgm.volume = 0.4; var muted = false, started = false;
+    function tryStart() { if (muted || started) return; var p = bgm.play(); if (p && p.then) p.then(function () { started = true; }).catch(function () {}); }
+    window.__startMusic = tryStart;                                  // appelable depuis la scène VR (sessionstart)
+    ['pointerdown', 'keydown', 'touchstart'].forEach(function (ev) { document.addEventListener(ev, tryStart); });
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation(); muted = !muted;
+      if (muted) { bgm.pause(); btn.textContent = '🔇'; btn.style.opacity = 0.5; }
+      else { btn.textContent = '🎵'; btn.style.opacity = 1; started = false; tryStart(); }
+    });
+  })();
+</script>
+
+<!-- 2) Le jeu, inchangé (il pilote sa propre boucle via requestAnimationFrame) -->
+<script src="game.js"></script>
+
+<!-- 3) Init : canvas à résolution fixe + passerelle manettes + démarrage du niveau -->
+<script>
+  // On fige le canvas à la résolution native du monde (1280×720) pour une texture nette.
+  window.removeEventListener('resize', resize); // neutralise le redimensionnement fenêtre
+  canvas.width = 1280;
+  canvas.height = 720;
+  scale = 1; viewX = 0; viewY = 0;
+
+  // Passerelle entrées VR → variables de game.js (ce script classique voit sticks/ghost/keys).
+  // mv  : {x,y} du stick gauche (-1..1) ou null (relâché) → déplacement
+  // aim : {x,y} du stick droit ou null → oriente le fantôme (garde la direction si null)
+  // blow: booléen (gâchette) → souffle
+  window.__vrInput = function (mv, aim, blow) {
+    if (mv) { sticks.move.id = 'vr'; sticks.move.kx = mv.x * STICK_MAX; sticks.move.ky = mv.y * STICK_MAX; }
+    else    { sticks.move.id = null; sticks.move.kx = 0; sticks.move.ky = 0; }
+    if (aim) { ghost.angle = Math.atan2(aim.y, aim.x); }
+    keys['Space'] = !!blow;
+  };
+
+  startGame();                 // charge le niveau image et passe en GS.PLAY (pas de menu à cliquer)
+  // Note : le jeu (décor + obstacles + fantôme + bulle) est rendu ENTIER sur un seul plan
+  //        → tout est cohérent, à la même profondeur. Le relief interne (pop-up) viendra
+  //        quand on découpera le décor en calques (obstacles au plan de jeu, fond au loin).
+</script>
+
+<!-- 5) Scène WebXR : l'écran flottant -->
+<script type="module">
+  import * as THREE from 'three';
+  import { VRButton } from './vendor/VRButton.js';
+  import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
+  import { OrbitControls } from './vendor/controls/OrbitControls.js';
+
+  const gameCanvas = document.getElementById('game');
+
+  // Écran de chargement : suit TOUS les modèles via le LoadingManager par défaut (utilisé par tous les GLTFLoader)
+  {
+    const ls = document.getElementById('loadingScreen'), lb = document.getElementById('loadingBar'), lp = document.getElementById('loadingPct');
+    let done = false;
+    const hide = () => { if (done || !ls) return; done = true; ls.style.opacity = '0'; setTimeout(() => ls.remove(), 700); };
+    THREE.DefaultLoadingManager.onProgress = (url, loaded, total) => { const pct = total ? Math.round(loaded / total * 100) : 0; if (lb) lb.style.width = pct + '%'; if (lp) lp.textContent = pct + '%'; };
+    THREE.DefaultLoadingManager.onLoad = () => { if (lb) lb.style.width = '100%'; if (lp) lp.textContent = '100%'; setTimeout(hide, 350); };
+    setTimeout(hide, 25000);   // filet de sécurité si un asset ne se charge pas
+  }
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x9fc4ea); // secours si la texture du ciel tarde (bleu jour)
+
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 100);
+  camera.position.set(0, 1.6, 0); // hauteur des yeux (assis/debout) ; le casque prend le relais en VR
+
+  // « rig joueur » : porte la caméra. On déplace/pivote CE groupe pour se déplacer en VR.
+  const player = new THREE.Group();
+  player.add(camera);
+  scene.add(player);
+
+  // ============================================================
+  //  PERSONNAGE JOUABLE (GLB Meshy : riggé + animé Walking/Running)
+  //  Dirigé au joystick : MARCHE + SAUT + ramasse les DIAMANTS. Caméra 3e personne.
+  // ============================================================
+  const hero = new THREE.Group();
+  const heroMesh = new THREE.Group();      // partie visuelle séparée de la physique
+  hero.add(heroMesh);
+  hero.position.set(-52, 0, 0);              // départ au TOUT DÉBUT de la route (bout -X)
+  hero.rotation.y = Math.PI / 2;             // face à la route (le long de +X)
+  scene.add(hero);
+
+  const HERO_HEIGHT = 0.55;                  // taille cible du perso (unités monde)
+  const MODEL_YAW = 0;                        // orientation du modèle (validé : on voit le dos en marche avant)
+  let heroMixer = null, walkAction = null, runAction = null, jumpAction = null, idleAction = null, fallAction = null, heroReady = false;
+  let heroWasAir = false, heroJumpW = 0, heroWalkW = 0, heroIdleW = 0, heroFallW = 0;   // fondus idle/walk/jump/fall
+  new GLTFLoader().load('models/character.glb?v=2', function (gltf) {
+    const m = gltf.scene;
+    let box = new THREE.Box3().setFromObject(m);
+    const size = new THREE.Vector3(); box.getSize(size);
+    m.scale.setScalar(HERO_HEIGHT / (size.y || 1));
+    box = new THREE.Box3().setFromObject(m);                 // recalcul après échelle
+    m.position.y -= box.min.y;                                // pieds au sol (y=0)
+    m.position.x -= (box.min.x + box.max.x) / 2;             // centré
+    m.position.z -= (box.min.z + box.max.z) / 2;
+    m.rotation.y = MODEL_YAW;
+    m.traverse(o => {
+      if (!o.isMesh) return;
+      o.frustumCulled = false; o.castShadow = false;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const mat of mats) {                       // fix « on voit l'intérieur du corps » de dos/profil
+        if (!mat) continue;
+        mat.side = THREE.DoubleSide;                  // dessine les 2 faces (normales parfois inversées)
+        mat.transparent = false; mat.opacity = 1;     // aucune transparence
+        mat.depthWrite = true; mat.alphaTest = 0;
+        mat.needsUpdate = true;
+      }
+    });
+    heroMesh.add(m);
+    heroMixer = new THREE.AnimationMixer(m);
+    const clips = gltf.animations || [];
+    // ROOT MOTION : on ne touche qu'à la piste de position du bassin (Hips).
+    //  - anims normales : on la retire (marche/saut SUR PLACE, la physique gère le déplacement)
+    //  - anim de CHUTE : on garde la composante VERTICALE (le corps descend au sol) mais on fige
+    //    l'horizontale à sa valeur de repos (sinon double déplacement avec l'élan qu'on ajoute).
+    const HIPS_REST_X = 0.364, HIPS_REST_Z = -11.285;
+    clips.forEach(c => {
+      const isFall = /fall/i.test(c.name);
+      c.tracks = c.tracks.filter(t => {
+        if (t.name.includes('Hips') && t.name.endsWith('.position')) {
+          if (isFall) { for (let i = 0; i < t.values.length; i += 3) { t.values[i] = HIPS_REST_X; t.values[i + 2] = HIPS_REST_Z; } return true; }
+          return false;
+        }
+        return true;
+      });
+    });
+    const walk = clips.find(c => /walk/i.test(c.name)) || clips[0];
+    const jump = clips.find(c => /obstacle/i.test(c.name)) || clips.find(c => /jump/i.test(c.name));
+    const run  = clips.find(c => /run/i.test(c.name));
+    const fall = clips.find(c => /fall/i.test(c.name));
+    const idle = clips.find(c => !/walk|run|jump|obstacle|fall/i.test(c.name));   // l'idle (Lower_Weapon_Look_Raise)
+    if (walk) { walkAction = heroMixer.clipAction(walk); walkAction.play(); walkAction.setEffectiveWeight(0); }
+    if (jump) { jumpAction = heroMixer.clipAction(jump); jumpAction.setLoop(THREE.LoopRepeat); jumpAction.play(); jumpAction.setEffectiveWeight(0); }
+    if (idle) { idleAction = heroMixer.clipAction(idle); idleAction.play(); idleAction.setEffectiveWeight(1); }
+    if (fall) { fallAction = heroMixer.clipAction(fall); fallAction.setLoop(THREE.LoopOnce); fallAction.clampWhenFinished = true; fallAction.play(); fallAction.setEffectiveWeight(0); }
+    if (run)  { runAction = heroMixer.clipAction(run); }
+    heroReady = true;
+  });
+
+  // physique + réglages du perso
+  let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
+  const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 56;   // plateau doublé (route plus longue)
+  const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
+  const HERO_RADIUS = 0.28;                   // rayon de collision du perso
+  let heroFallT = 0, heroFallVX = 0, heroFallVZ = 0;   // chute : timer + élan « de l'autre côté »
+  let heroDeadT = 0;                          // >0 = mort (voiture) → respawn au départ à la fin
+  let heroJumps = 0, heroPrevY = 0, heroCar = null;   // double saut · y précédent · voiture sous les pieds
+  const walkPlatforms = [];                   // {x0,x1,z0,z1,h} : surfaces surélevées marchables (trottoirs)
+  const barriers = [];                        // barrières rouges/blanches à sauter (sur la route)
+  const assetBase = {};                       // modèles de base pour l'ÉDITEUR (peuplé au chargement)
+  const EDIT = { on: false, type: 'house1', sel: null, placed: [], drag: false, orbit: false, pan: false,
+                 yaw: Math.PI * 0.2, pitch: 0.85, dist: 20, tx: 0, tz: 0, lx: 0, ly: 0, hold: {} };
+  // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
+  const SB_URL = 'https://supabase-api.swipego.app';
+  const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
+  const ROAD = { z: 0, len: 110, w: 6, sideW: 3.2, sideH: 0.22 };   // route DOUBLÉE en longueur (58→110) ; chaussée w6 ; trottoirs 3.2
+  ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
+  function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
+  function tryJump() {
+    if (heroFallT > 0 || heroDeadT > 0) return;
+    if (heroOnGround) { heroVelY = HERO_JUMP; heroOnGround = false; heroJumps = 1; }        // 1er saut
+    else if (heroJumps < 2) { heroVelY = HERO_JUMP; heroJumps = 2; }                        // DOUBLE saut (en l'air)
+  }
+
+  // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
+  let camYaw = Math.PI / 2 + Math.PI, camPitch = 0.42;   // caméra derrière le perso (qui regarde +X / la route)
+  const CAM_DIST = 6.4;
+  const _camTarget = new THREE.Vector3(), _hv = new THREE.Vector3();
+  function updateFollowCam() {
+    _camTarget.set(hero.position.x, hero.position.y + 0.7, hero.position.z);
+    const cd = CAM_DIST * Math.cos(camPitch);
+    camera.position.set(
+      _camTarget.x + Math.sin(camYaw) * cd,
+      _camTarget.y + CAM_DIST * Math.sin(camPitch),
+      _camTarget.z + Math.cos(camYaw) * cd
+    );
+    camera.lookAt(_camTarget);
+  }
+  // VR : la caméra suit le perso — on place le RIG derrière ET AU-DESSUS (vue en plongée), le casque gère le regard
+  const VR_DIST = 5.0, VR_HEIGHT = 1.1;       // hauteur du rig VR : légère plongée (baisse la tête pour voir le perso)
+  function updateFollowRigVR() {
+    player.position.set(
+      hero.position.x + Math.sin(camYaw) * VR_DIST,
+      VR_HEIGHT,
+      hero.position.z + Math.cos(camYaw) * VR_DIST
+    );
+    player.rotation.y = camYaw;                 // oriente le rig vers le perso (regard neutre = perso en face)
+  }
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.xr.enabled = true;
+  renderer.xr.setReferenceSpaceType('local-floor');
+  // Rendu VR NET : supersampling du framebuffer + pas de rendu fovéal (bords nets)
+  try { renderer.xr.setFramebufferScaleFactor(1.5); } catch (e) {}   // 1.0 = natif ; 1.5 = plus net (baisser si ça rame)
+  try { renderer.xr.setFoveation(0); } catch (e) {}                  // 0 = aucune dégradation périphérique
+  document.body.appendChild(renderer.domElement);
+  const vrBtn = VRButton.createButton(renderer);
+  document.body.appendChild(vrBtn);
+  // Rendre le bouton "ENTER VR" GROS et bien visible (sinon on le rate / on prend celui du navigateur)
+  const styleVR = function () {
+    vrBtn.style.cssText += ';padding:18px 40px !important;font-size:24px !important;bottom:32px !important;left:50% !important;transform:translateX(-50%) !important;border:4px solid #8fe !important;border-radius:36px !important;background:rgba(15,35,70,0.94) !important;color:#dfffff !important;opacity:1 !important;z-index:60 !important;width:auto !important;letter-spacing:1px !important;';
+  };
+  styleVR(); let _vt = 0; const _vi = setInterval(function () { styleVR(); if (++_vt > 12) clearInterval(_vi); }, 200);
+
+  // PERSO : marche + saut + gravité (le fantôme volant est désactivé).
+  let mobileUp = false, mobileDown = false;   // (obsolètes — plus de vol vertical)
+  function jump() { tryJump(); }   // bouton A/B (VR) = saut
+
+  // Souffle (bulle) : sources d'entrée (VR gâchette / mobile bouton / PC touche F)
+  let vrTrigger = false, mobileBlow = false, pcBlow = false;
+  // État clavier PC : WASD/flèches = voler, Espace/Maj = monter/descendre, F = souffler, G = planter
+  let kW = false, kA = false, kS = false, kD = false;
+  addEventListener('keydown', (e) => {
+    switch (e.code) {
+      case 'KeyF': pcBlow = true; break;
+      case 'KeyG': plant(); break;
+      case 'KeyW': case 'ArrowUp': kW = true; break;
+      case 'KeyS': case 'ArrowDown': kS = true; break;
+      case 'KeyA': case 'ArrowLeft': kA = true; break;
+      case 'KeyD': case 'ArrowRight': kD = true; break;
+      case 'Space': if (!e.repeat) tryJump(); e.preventDefault(); break;
+    }
+  });
+  addEventListener('keyup', (e) => {
+    switch (e.code) {
+      case 'KeyF': pcBlow = false; break;
+      case 'KeyW': case 'ArrowUp': kW = false; break;
+      case 'KeyS': case 'ArrowDown': kS = false; break;
+      case 'KeyA': case 'ArrowLeft': kA = false; break;
+      case 'KeyD': case 'ArrowRight': kD = false; break;
+    }
+  });
+
+  // Détection tactile (téléphone/tablette)
+  const MOBILE = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+  // État des contrôles mobiles (marche + regard)
+  let controls = null;
+  let joyX = 0, joyY = 0, mYaw = 0, mPitch = 0, lookId = null, lastLX = 0, lastLY = 0;
+
+  if (!MOBILE) {
+    // PC : 3e personne — souris = tourner la caméra autour du perso, JOYSTICK souris (+ WASD) = marcher, Espace = saut
+    const dom = renderer.domElement;
+    dom.style.touchAction = 'none';
+    dom.addEventListener('contextmenu', (e) => e.preventDefault());   // pas de menu clic droit
+
+    // --- Caméra 3e personne : glisser la souris pour orbiter autour du perso ---
+    let dragLook = false;
+    dom.addEventListener('pointerdown', (e) => {
+      if (EDIT.on) return;                       // éditeur actif : la souris pilote l'éditeur
+      dragLook = true; lastLX = e.clientX; lastLY = e.clientY;
+      try { dom.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    dom.addEventListener('pointermove', (e) => {
+      if (EDIT.on || !dragLook) return;
+      camPitch += (e.clientY - lastLY) * 0.005;              // caméra derrière : la souris règle juste la hauteur de vue
+      lastLX = e.clientX; lastLY = e.clientY;
+      camPitch = Math.max(0.12, Math.min(1.3, camPitch));
+    });
+    const endLook = () => { dragLook = false; };
+    dom.addEventListener('pointerup', endLook);
+    dom.addEventListener('pointercancel', endLook);
+
+    // --- Joystick SOURIS (marcher) en bas à gauche ---
+    const base = document.createElement('div');
+    base.style.cssText = 'position:fixed;left:24px;bottom:70px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.4);z-index:30;touch-action:none;cursor:grab;';
+    const knob = document.createElement('div');
+    knob.style.cssText = 'position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.6);pointer-events:none;';
+    base.appendChild(knob); document.body.appendChild(base);
+    const R = 45; let jactive = false;
+    function setKnob(dx, dy) {
+      const d = Math.hypot(dx, dy); if (d > R) { dx = dx / d * R; dy = dy / d * R; }
+      knob.style.left = (35 + dx) + 'px'; knob.style.top = (35 + dy) + 'px';
+      joyX = dx / R; joyY = dy / R;
+    }
+    function joyFrom(e) { const r = base.getBoundingClientRect(); setKnob(e.clientX - r.left - 60, e.clientY - r.top - 60); }
+    base.addEventListener('pointerdown', (e) => { jactive = true; try { base.setPointerCapture(e.pointerId); } catch (_) {} joyFrom(e); e.preventDefault(); });
+    base.addEventListener('pointermove', (e) => { if (jactive) joyFrom(e); });
+    const endJoy = () => { jactive = false; joyX = 0; joyY = 0; knob.style.left = '35px'; knob.style.top = '35px'; };
+    base.addEventListener('pointerup', endJoy); base.addEventListener('pointercancel', endJoy);
+
+    // --- Bouton SAUT (souris) ---
+    const jbtn = document.createElement('div'); jbtn.textContent = '⤒';
+    jbtn.style.cssText = 'position:fixed;right:24px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;display:flex;align-items:center;justify-content:center;font-size:40px;color:#fff;user-select:none;cursor:pointer;';
+    jbtn.addEventListener('pointerdown', (e) => { tryJump(); e.preventDefault(); });
+    document.body.appendChild(jbtn);
+  } else {
+    // TÉLÉPHONE : joystick (marcher) + glisser (regarder)
+    const base = document.createElement('div');
+    base.style.cssText = 'position:fixed;left:24px;bottom:70px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.4);z-index:30;touch-action:none;';
+    const knob = document.createElement('div');
+    knob.style.cssText = 'position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.6);';
+    base.appendChild(knob); document.body.appendChild(base);
+    const R = 45; let jid = null;
+    function setKnob(dx, dy) {
+      const d = Math.hypot(dx, dy); if (d > R) { dx = dx / d * R; dy = dy / d * R; }
+      knob.style.left = (35 + dx) + 'px'; knob.style.top = (35 + dy) + 'px';
+      joyX = dx / R; joyY = dy / R;
+    }
+    function joyFrom(t) { const r = base.getBoundingClientRect(); setKnob(t.clientX - r.left - 60, t.clientY - r.top - 60); }
+    base.addEventListener('touchstart', (e) => { const t = e.changedTouches[0]; jid = t.identifier; joyFrom(t); e.preventDefault(); }, { passive: false });
+    base.addEventListener('touchmove', (e) => { for (const t of e.changedTouches) if (t.identifier === jid) joyFrom(t); e.preventDefault(); }, { passive: false });
+    const endJoy = (e) => { for (const t of e.changedTouches) if (t.identifier === jid) { jid = null; joyX = 0; joyY = 0; knob.style.left = '35px'; knob.style.top = '35px'; } };
+    base.addEventListener('touchend', endJoy); base.addEventListener('touchcancel', endJoy);
+
+    const dom = renderer.domElement;
+    dom.addEventListener('touchstart', (e) => { const t = e.changedTouches[0]; lookId = t.identifier; lastLX = t.clientX; lastLY = t.clientY; }, { passive: false });
+    dom.addEventListener('touchmove', (e) => {
+      for (const t of e.changedTouches) if (t.identifier === lookId) {
+        camPitch += (t.clientY - lastLY) * 0.005;   // caméra derrière : glisser = hauteur de vue
+        lastLX = t.clientX; lastLY = t.clientY;
+        camPitch = Math.max(0.12, Math.min(1.3, camPitch));
+      }
+      e.preventDefault();
+    }, { passive: false });
+    const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
+    dom.addEventListener('touchend', endLook); dom.addEventListener('touchcancel', endLook);
+
+    // Bouton SAUT
+    const jbtn = document.createElement('div'); jbtn.textContent = '⤒';
+    jbtn.style.cssText = 'position:fixed;right:24px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:40px;color:#fff;user-select:none;';
+    jbtn.addEventListener('touchstart', (e) => { tryJump(); e.preventDefault(); }, { passive: false });
+    document.body.appendChild(jbtn);
+
+    // Bouton SOUFFLER (à gauche du saut)
+    const bbtn = document.createElement('div');
+    bbtn.textContent = '💨';
+    bbtn.style.cssText = 'position:fixed;right:120px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(190,240,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:34px;user-select:none;';
+    bbtn.addEventListener('touchstart', (e) => { mobileBlow = true; e.preventDefault(); }, { passive: false });
+    bbtn.addEventListener('touchend', () => { mobileBlow = false; });
+    bbtn.addEventListener('touchcancel', () => { mobileBlow = false; });
+    document.body.appendChild(bbtn);
+
+    // Bouton PLANTER (à gauche du souffle)
+    const pbtn = document.createElement('div');
+    pbtn.textContent = '🌱';
+    pbtn.style.cssText = 'position:fixed;right:216px;bottom:80px;width:84px;height:84px;border-radius:50%;background:rgba(150,220,150,.30);border:2px solid rgba(255,255,255,.55);z-index:30;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:34px;user-select:none;';
+    pbtn.addEventListener('touchstart', (e) => { plant(); e.preventDefault(); }, { passive: false });
+    document.body.appendChild(pbtn);
+  }
+
+  // Écran de jeu 2D — MASQUÉ pour l'instant (mettre GAME_ENABLED = true pour le réafficher)
+  const GAME_ENABLED = false;
+  const DAYTIME = true;   // true = ciel bleu + soleil ; false = nuit étoilée
+
+  // --- Écran flottant texturé par le canvas du jeu ---
+  const tex = new THREE.CanvasTexture(gameCanvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+
+  const screenW = 3.2, screenH = screenW * 720 / 1280; // 16:9
+  const ACTION_Z = -2.6, ACTION_Y = 1.55;
+  const screen = new THREE.Mesh(
+    new THREE.PlaneGeometry(screenW, screenH),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+  );
+  screen.position.set(0, ACTION_Y, ACTION_Z);
+  if (GAME_ENABLED) scene.add(screen);
+
+  // ============================================================
+  //  SOL HERBE + LUMIÈRE + LIMITE DU JARDIN
+  // ============================================================
+  // Lumière : jour (soleil chaud) ou nuit (lune bleutée) selon DAYTIME
+  scene.add(new THREE.HemisphereLight(
+    DAYTIME ? 0xbcd8ff : 0x93a7ff, DAYTIME ? 0x6a8a4a : 0x1a2a1a, DAYTIME ? 1.1 : 0.9));
+  const sunLight = new THREE.DirectionalLight(DAYTIME ? 0xfff2d0 : 0xcfe0ff, DAYTIME ? 1.7 : 0.7);
+  sunLight.position.set(0.35 * 20, 0.62 * 20, -0.70 * 20); // depuis la direction du soleil
+  scene.add(sunLight);
+
+  // Sol : herbe = un grand disque + texture d'herbe procédurale répétée
+  function makeGrassTexture() {
+    const s = 512, c = document.createElement('canvas'); c.width = c.height = s;
+    const x = c.getContext('2d');
+    x.fillStyle = '#2f5d34'; x.fillRect(0, 0, s, s);               // vert de base
+    for (let i = 0; i < 9000; i++) {                              // brins/nuances
+      const g = 60 + (Math.random() * 90 | 0);
+      x.fillStyle = 'rgba(' + (30 + (Math.random()*40|0)) + ',' + g + ',' + (40 + (Math.random()*30|0)) + ',0.5)';
+      x.fillRect(Math.random()*s, Math.random()*s, 1.5, 2 + Math.random()*3);
+    }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(28, 28);
+    return t;
+  }
+  const GARDEN_R = 58;                                            // rayon du jardin (plateau doublé pour la route allongée)
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(GARDEN_R, 64),
+    new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 1, metalness: 0 })
+  );
+  ground.rotation.x = -Math.PI / 2;                              // à plat
+  scene.add(ground);
+
+  // --- VRAIE HERBE : milliers de brins DEBOUT (InstancedMesh) + léger vent ---
+  let grassWind = null, grassMesh = null, grassOrig = null, grassXZ = null;
+  {
+    const H = 0.32, W = 0.04, SEG = 4;
+    const bg = new THREE.PlaneGeometry(W, H, 1, SEG);
+    bg.translate(0, H / 2, 0);                          // base du brin à y=0
+    const bp = bg.attributes.position, cols = [];
+    const cBase = new THREE.Color(0x356e28), cTip = new THREE.Color(0x8fce5a);
+    for (let i = 0; i < bp.count; i++) {
+      const t = bp.getY(i) / H;                         // 0 = base, 1 = pointe
+      bp.setX(i, bp.getX(i) * (1 - t * 0.85));          // effilé vers la pointe
+      bp.setZ(i, bp.getZ(i) + t * t * 0.05);            // légère courbure
+      const c = cBase.clone().lerp(cTip, t);
+      cols.push(c.r, c.g, c.b);                         // dégradé base sombre → pointe claire
+    }
+    bg.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    bg.computeVertexNormals();
+
+    const gm = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+    gm.onBeforeCompile = (sh) => {                       // vent : la pointe oscille, pas la base
+      sh.uniforms.uTime = { value: 0 }; grassWind = sh.uniforms.uTime;
+      sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\n float ph = instanceMatrix[3].x*0.6 + instanceMatrix[3].z*0.6;\n transformed.x += sin(uTime*1.6 + ph) * uv.y * uv.y * 0.07;'
+      );
+    };
+
+    const COUNT = 26000;                                // plateau doublé → plus de brins pour garder la densité
+    const grass = new THREE.InstancedMesh(bg, gm, COUNT);
+    const d = new THREE.Object3D();
+    grassOrig = new Array(COUNT); grassXZ = new Float32Array(COUNT * 2);
+    for (let i = 0; i < COUNT; i++) {
+      let px = 0, pz = 0, tries = 0;
+      do { const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * (GARDEN_R - 1); px = Math.cos(a) * r; pz = Math.sin(a) * r; tries++; } while (onRoad(px, pz) && tries < 8);
+      if (onRoad(px, pz)) { d.scale.setScalar(0); d.position.set(0, -5, 0); d.updateMatrix(); grass.setMatrixAt(i, d.matrix); grassOrig[i] = d.matrix.clone(); grassXZ[i * 2] = 0; grassXZ[i * 2 + 1] = 0; continue; }   // rien sur la route
+      d.position.set(px, 0, pz);
+      d.rotation.set((Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.3);
+      d.scale.setScalar(0.7 + Math.random() * 0.8);
+      d.updateMatrix();
+      grass.setMatrixAt(i, d.matrix);
+      grassOrig[i] = d.matrix.clone(); grassXZ[i * 2] = px; grassXZ[i * 2 + 1] = pz;
+    }
+    scene.add(grass); grassMesh = grass;
+  }
+
+  // Obstacles qui font ÉCLATER la bulle (rempli au fur et à mesure : buissons, arbres, maison)
+  const obstacles = [];
+
+  // Limite : anneau de buissons VISIBLE + garde-fou en CODE (BOUND_R, appliqué dans updateVR)
+  const BOUND_R = GARDEN_R - 1.5;
+  const bushGeo = new THREE.IcosahedronGeometry(0.6, 1);
+  const bushMat = new THREE.MeshStandardMaterial({ color: 0x2b6b3a, roughness: 1, flatShading: true });
+  for (let i = 0; i < 92; i++) {
+    const a = (i / 92) * Math.PI * 2;
+    const b = new THREE.Mesh(bushGeo, bushMat);
+    b.position.set(Math.cos(a) * GARDEN_R * 0.98, 0.35, Math.sin(a) * GARDEN_R * 0.98);
+    b.scale.setScalar(0.7 + Math.random() * 0.9);
+    scene.add(b);
+    obstacles.push({ pos: b.position.clone().setY(0.55), r: 0.55 * b.scale.x });
+  }
+
+  // ============================================================
+  //  ENVIRONNEMENT ENVELOPPANT : ciel + étoiles + nuages
+  //  → on peut tourner la tête, plus de noir total.
+  // ============================================================
+
+  // --- Dôme de ciel : dégradé crépusculaire assorti à la grotte ---
+  function makeSkyTexture() {
+    const c = document.createElement('canvas'); c.width = 16; c.height = 256;
+    const x = c.getContext('2d');
+    const g = x.createLinearGradient(0, 0, 0, 256);
+    if (DAYTIME) {
+      g.addColorStop(0.00, '#2b6fd6'); // zénith bleu
+      g.addColorStop(0.45, '#5b9be6');
+      g.addColorStop(0.78, '#a9d4f2');
+      g.addColorStop(0.92, '#d8eefb'); // horizon pâle
+      g.addColorStop(1.00, '#cfe6f2');
+    } else {
+      g.addColorStop(0.00, '#05071a'); // zénith (nuit profonde)
+      g.addColorStop(0.42, '#141a4d');
+      g.addColorStop(0.70, '#3c2a72'); // violet magique
+      g.addColorStop(0.88, '#7d4a8e'); // horizon rosé
+      g.addColorStop(1.00, '#2e2258');
+    }
+    x.fillStyle = g; x.fillRect(0, 0, 16, 256);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  }
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(50, 32, 16),
+    new THREE.MeshBasicMaterial({ map: makeSkyTexture(), side: THREE.BackSide, depthWrite: false })
+  );
+  scene.add(sky);
+
+  // --- Soleil (jour) : disque lumineux + halo additif ---
+  if (DAYTIME) {
+    const sunPos = new THREE.Vector3(0.35, 0.62, -0.70).normalize().multiplyScalar(44);
+    const sun = new THREE.Mesh(
+      new THREE.SphereGeometry(2.4, 24, 24),
+      new THREE.MeshBasicMaterial({ color: 0xfff6d8 })
+    );
+    sun.position.copy(sunPos); scene.add(sun);
+    // halo doux (sprite additif)
+    const gs = 128, gc = document.createElement('canvas'); gc.width = gc.height = gs;
+    const gx = gc.getContext('2d');
+    const gg = gx.createRadialGradient(gs/2, gs/2, 0, gs/2, gs/2, gs/2);
+    gg.addColorStop(0, 'rgba(255,248,220,0.95)');
+    gg.addColorStop(0.4, 'rgba(255,240,190,0.35)');
+    gg.addColorStop(1, 'rgba(255,240,190,0)');
+    gx.fillStyle = gg; gx.fillRect(0, 0, gs, gs);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(gc), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true
+    }));
+    glow.scale.setScalar(16); glow.position.copy(sunPos); scene.add(glow);
+  }
+
+  // --- Étoiles (seulement la nuit) ---
+  if (!DAYTIME) {
+    const N = 700, sp = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const th = Math.random() * Math.PI * 2, ph = Math.acos(1 - Math.random() * 0.9), r = 46;
+      sp[i*3] = r * Math.sin(ph) * Math.cos(th);
+      sp[i*3+1] = r * Math.cos(ph) + 2;
+      sp[i*3+2] = r * Math.sin(ph) * Math.sin(th);
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
+      color: 0xbfd4ff, size: 0.2, sizeAttenuation: true, transparent: true, opacity: 0.9, depthWrite: false
+    })));
+  }
+
+  // --- Nuages : texture douce procédurale + billboards qui dérivent ---
+  function makeCloudTexture() {
+    const s = 256, c = document.createElement('canvas'); c.width = c.height = s;
+    const x = c.getContext('2d');
+    for (let i = 0; i < 16; i++) {
+      const cx = s * (0.2 + 0.6 * Math.random()), cy = s * (0.4 + 0.25 * Math.random()), rr = s * (0.1 + 0.16 * Math.random());
+      const g = x.createRadialGradient(cx, cy, 0, cx, cy, rr);
+      g.addColorStop(0, 'rgba(255,255,255,0.9)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g; x.beginPath(); x.arc(cx, cy, rr, 0, 7); x.fill();
+    }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  }
+  const cloudTex = makeCloudTexture();
+  const clouds = [];
+  for (let i = 0; i < 10; i++) {
+    const w = 6 + Math.random() * 7;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.5), new THREE.MeshBasicMaterial({
+      map: cloudTex, transparent: true, opacity: 0.22 + Math.random() * 0.22, depthWrite: false, color: 0xc3b0ea
+    }));
+    m.userData.ang = Math.random() * Math.PI * 2;
+    m.userData.rad = 16 + Math.random() * 18;
+    m.userData.y = 3 + Math.random() * 11;
+    m.userData.spd = 0.006 + Math.random() * 0.01; // dérive très lente (confort)
+    clouds.push(m); scene.add(m);
+  }
+  function placeCloud(cl) {
+    cl.position.set(Math.cos(cl.userData.ang) * cl.userData.rad, cl.userData.y, Math.sin(cl.userData.ang) * cl.userData.rad);
+    cl.lookAt(0, cl.userData.y, 0);
+  }
+  clouds.forEach(placeCloud);
+
+  // ============================================================
+  //  DÉCORS « PLANTÉS » : on charge le cristal UNE fois, puis on
+  //  en pose plusieurs sur l'herbe (position + taille + rotation).
+  //  → C'est LA méthode pour planter n'importe quel décor 3D.
+  // ============================================================
+  const crystals = [];
+  new GLTFLoader().load('models/crystal.glb', function (gltf) {
+    const base = gltf.scene;
+    const tints = [0xff33cc, 0x9b5cff, 0x3fe0d0, 0xff7ad0, 0x66aaff];
+    const spots = [                                  // (x,z,s) au sol ; +y = FLOTTANT (à attraper en sautant)
+      { x: 0,   z: -2.5, s: 0.42 },
+      { x: -3,  z: -1.5, s: 0.30 }, { x: 3,  z: -3,   s: 0.30 },
+      { x: 4.5, z: 2,    s: 0.32 }, { x: -4, z: 3,    s: 0.28 },
+      { x: 1.5, z: 4.5,  s: 0.30 }, { x: -2, z: -4.5, s: 0.28 }, { x: 6, z: -1, s: 0.30 },
+      { x: 2,  z: 1,  s: 0.34, y: 1.5 }, { x: -5, z: -2, s: 0.34, y: 1.7 },
+      { x: 0,  z: 5,  s: 0.34, y: 1.4 }, { x: -1, z: -6, s: 0.34, y: 1.9 }
+    ];
+    for (let i = 0; i < spots.length; i++) {
+      const c = base.clone(true);
+      const s = spots[i].s;
+      c.scale.setScalar(s);
+      const y = (spots[i].y != null) ? spots[i].y : s * 1.3;
+      c.position.set(spots[i].x, y, spots[i].z);
+      c.rotation.y = i * 1.3;
+      const tint = tints[i % tints.length];
+      c.traverse(function (o) {
+        if (o.isMesh && o.material) {
+          o.material = o.material.clone();                       // matériau indépendant par cristal
+          o.material.color = new THREE.Color(tint);
+          o.material.emissive = new THREE.Color(tint);
+          o.material.emissiveIntensity = 1.8;
+          if ('transmission' in o.material) o.material.transmission = 0;
+          o.material.roughness = 0.15; o.material.metalness = 0;
+        }
+      });
+      c.userData = { collected: false, pop: 0, baseScale: s, floating: spots[i].y != null, baseY: y };
+      scene.add(c);
+      crystals.push(c);
+    }
+    totalCrystals = crystals.length;
+    refreshHUD();
+  });
+
+  // --- PIÈCES D'OR : collectibles EN HAUTEUR (à attraper en sautant / double-saut) → compteur "Or" dans le HUD ---
+  const coins = [];
+  new GLTFLoader().load('models/coin.glb?v=1', function (gltf) {
+    const base = gltf.scene;
+    base.traverse(function (o) {
+      if (o.isMesh && o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) { mt.metalness = 0.25; mt.roughness = 0.35; mt.emissive = new THREE.Color(0x4a3200); mt.emissiveIntensity = 0.35; mt.side = THREE.DoubleSide; } }); }
+    });
+    const S = 0.34, lanes = [-1.5, 0, 1.5], spots = [];
+    let li = 0;
+    for (let x = -50; x <= 52; x += 3.4) {                    // arcs de 3 pièces (monte→descend) sur tout le parcours allongé
+      const z = lanes[li % 3]; li++;
+      spots.push({ x: x - 0.95, z: z, y: 1.6 });
+      spots.push({ x: x,        z: z, y: 2.1 });
+      spots.push({ x: x + 0.95, z: z, y: 1.6 });
+    }
+    for (let i = 0; i < spots.length; i++) {
+      const c = base.clone(true);
+      c.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });   // matériau INDÉPENDANT par pièce (sinon fondu global)
+      c.scale.setScalar(S);
+      c.position.set(spots[i].x, spots[i].y, spots[i].z);
+      c.rotation.y = i * 0.6;
+      c.userData = { collected: false, pop: 0, baseScale: S, baseY: spots[i].y };
+      scene.add(c); coins.push(c);
+    }
+    refreshHUD();
+  });
+
+  // --- Champignons (Meshy, réalistes) plantés sur l'herbe — obstacles-plateformes ---
+  const mushrooms = [];                                 // (dandinement : seulement les plantés)
+  const mushroomObstacles = [];                         // {x,z,r,top} : à SAUTER par-dessus / se poser dessus
+  new GLTFLoader().load('models/mushroom_meshy.glb?v=1', function (gltf) {
+    const base = gltf.scene;
+    base.traverse(o => { if (o.isMesh) { const mats = Array.isArray(o.material) ? o.material : [o.material]; for (const mt of mats) if (mt) mt.side = THREE.DoubleSide; } });
+    mushroomBase = base;                                // réutilisé pour le jardinage
+    assetBase.mushroom = base;                          // pour l'éditeur
+    const bbox0 = new THREE.Box3().setFromObject(base);
+    const rawH = bbox0.getSize(new THREE.Vector3()).y || 1;
+    const capOffset = -bbox0.min.y;                    // |min.y| : garde la base au sol pendant le squash
+    const spots = [                                   // (x,z) + hauteur cible ; AUCUN sur la route
+      { x: -1.5, z: -3, h: 0.62 }, { x: 2.5, z: -4,   h: 0.55 },
+      { x: -6,   z: -4, h: 0.60 }, { x: 3.5, z: 3.5,  h: 0.74 },
+      { x: -2.5, z: 4,  h: 0.52 }, { x: 0.5, z: 2.8,  h: 0.60 }, { x: 6, z: 4, h: 0.58 }
+    ];
+    for (let i = 0; i < spots.length; i++) {
+      if (onRoad(spots[i].x, spots[i].z)) continue;     // jamais de champignon sur la route
+      const m = base.clone(true);
+      const sc = spots[i].h / rawH;
+      m.scale.setScalar(sc);
+      m.position.set(spots[i].x, capOffset * sc, spots[i].z);   // base au sol (modèle centré)
+      m.rotation.y = i * 1.3;
+      scene.add(m);
+      const bb = new THREE.Box3().setFromObject(m);
+      mushroomObstacles.push({ x: spots[i].x, z: spots[i].z, r: Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 * 0.6, top: bb.max.y * 0.82, mesh: m, base: sc, gk: capOffset, squash: 0, squashV: 0 });
+    }
+  });
+
+  // ============================================================
+  //  ROUTE stylisée : chaussée bitume + ligne pointillée + 2 trottoirs surélevés (marchables)
+  // ============================================================
+  {
+    function makeAsphaltTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+      x.fillStyle = '#565a63'; x.fillRect(0, 0, 128, 128);                        // bitume gris-bleu doux
+      for (let i = 0; i < 500; i++) { const g = 70 + (Math.random() * 40 | 0); x.fillStyle = 'rgba(' + g + ',' + (g + 4) + ',' + (g + 12) + ',0.5)'; x.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
+      // ROUTE À 2 VOIES : lignes de bord blanches continues + ligne centrale pointillée
+      x.fillStyle = '#e9e4d2'; x.fillRect(0, 9, 128, 5); x.fillRect(0, 114, 128, 5);   // lignes de bord (le long de la route)
+      x.fillStyle = '#f2e7c4'; x.fillRect(24, 60, 80, 7);                          // ligne centrale pointillée (sépare les 2 voies)
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 4, 1); return t;
+    }
+    function makeSideTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+      x.fillStyle = '#c3bcaa'; x.fillRect(0, 0, 128, 128);                         // dalles béton clair
+      x.strokeStyle = 'rgba(120,114,102,0.6)'; x.lineWidth = 4;
+      for (let i = 0; i <= 128; i += 32) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); }
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 1.5, 1); return t;
+    }
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.len, ROAD.w), new THREE.MeshStandardMaterial({ map: makeAsphaltTex(), roughness: 1, metalness: 0 }));
+    road.rotation.x = -Math.PI / 2; road.position.set(0, 0.012, ROAD.z); scene.add(road);   // juste au-dessus de l'herbe
+    const sideTex = makeSideTex();
+    for (const sgn of [-1, 1]) {
+      const zc = ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);
+      const s = new THREE.Mesh(new THREE.BoxGeometry(ROAD.len, ROAD.sideH, ROAD.sideW), new THREE.MeshStandardMaterial({ map: sideTex, roughness: 1, metalness: 0 }));
+      s.position.set(0, ROAD.sideH / 2, zc); scene.add(s);
+      walkPlatforms.push({ x0: -ROAD.len / 2, x1: ROAD.len / 2, z0: zc - ROAD.sideW / 2, z1: zc + ROAD.sideW / 2, h: ROAD.sideH });   // trottoir = plateforme montable
+    }
+  }
+
+  // --- ALLÉE D'ENTRÉE (procédurale) : dallage pavé + 2 piliers + haies, à poser devant les maisons ---
+  {
+    function makePavTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+      x.fillStyle = '#c9b593'; x.fillRect(0, 0, 128, 128);                                   // joints sable clair
+      for (let gy = 4; gy < 128; gy += 24) for (let gx = 4; gx < 128; gx += 24) {
+        const jx = gx + (Math.random() * 5 - 2.5), jy = gy + (Math.random() * 5 - 2.5), g = 150 + (Math.random() * 45 | 0);
+        x.fillStyle = 'rgb(' + g + ',' + (g - 16) + ',' + (g - 34) + ')';                    // pavés beige-gris
+        x.beginPath(); x.roundRect(jx, jy, 18, 18, 5); x.fill();
+      }
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 3); return t;
+    }
+    const grp = new THREE.Group();
+    const PL = 3.2, PW = 1.35;                                                                // longueur / largeur de l'allée
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(PW, 0.09, PL), new THREE.MeshStandardMaterial({ map: makePavTex(), roughness: 1, metalness: 0 }));
+    slab.position.y = 0.045; grp.add(slab);
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0xdaceb2, roughness: 0.95 });    // pierre crème (comme les maisons)
+    const capMat = new THREE.MeshStandardMaterial({ color: 0xb5462f, roughness: 0.9 });       // chapeau tuile rouge
+    for (const sx of [-1, 1]) {                                                               // 2 piliers d'entrée (côté trottoir)
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.95, 0.26), stoneMat);
+      post.position.set(sx * (PW / 2 + 0.12), 0.475, -PL / 2 + 0.15); grp.add(post);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.26, 4), capMat);
+      cap.rotation.y = Math.PI / 4; cap.position.set(post.position.x, 0.95 + 0.13, post.position.z); grp.add(cap);
+    }
+    const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x5a7d3c, roughness: 1 });       // haies le long de l'allée
+    for (const sx of [-1, 1]) {
+      const hedge = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.34, PL - 0.9), hedgeMat);
+      hedge.position.set(sx * (PW / 2 + 0.11), 0.17, 0.2); grp.add(hedge);
+    }
+    assetBase.path = grp;                                                                     // dispo dans l'éditeur
+  }
+
+  // --- BLOC DE DALLAGE (procédural) : dalles béton comme le trottoir, à poser pour paver une place ---
+  {
+    function makePlazaTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+      x.fillStyle = '#c3bcaa'; x.fillRect(0, 0, 128, 128);                                    // béton clair (idem trottoir)
+      for (let gy = 0; gy < 128; gy += 32) for (let gx = 0; gx < 128; gx += 32) { const g = 185 + (Math.random() * 26 | 0); x.fillStyle = 'rgba(' + g + ',' + (g - 7) + ',' + (g - 20) + ',0.35)'; x.fillRect(gx + 3, gy + 3, 26, 26); }
+      x.strokeStyle = 'rgba(120,114,102,0.6)'; x.lineWidth = 5;                               // joints entre dalles
+      for (let i = 0; i <= 128; i += 32) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); }
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2); return t;
+    }
+    const grp = new THREE.Group();
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(2, 0.06, 2), new THREE.MeshStandardMaterial({ map: makePlazaTex(), roughness: 1, metalness: 0 }));
+    slab.position.y = 0.03; grp.add(slab);
+    assetBase.paving = grp;                                                                   // dispo dans l'éditeur
+  }
+
+  // --- PASSAGE PIÉTON (procédural) : bandes blanches type zébra, à poser en travers de la route ---
+  {
+    const grp = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0xefe9da, roughness: 1, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    const bars = 6, barW = 0.5, gap = 0.4, step = barW + gap, len = 3.2, total = (bars - 1) * step;
+    for (let i = 0; i < bars; i++) {
+      const b = new THREE.Mesh(new THREE.PlaneGeometry(barW, len), mat);        // PLAN à plat (peinture, aucune épaisseur)
+      b.rotation.x = -Math.PI / 2; b.position.set(-total / 2 + i * step, 0, 0); grp.add(b);
+    }
+    assetBase.crosswalk = grp;                                                                // dispo dans l'éditeur
+  }
+
+  // --- FONTAINE : modèle pierre (Meshy) + EAU ANIMÉE par-dessus (jet central + 4 cascades + ondulations) ---
+  const _dropTex = (function () {
+    const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d');
+    const g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, 'rgba(235,251,255,0.98)'); g.addColorStop(0.5, 'rgba(150,224,255,0.65)'); g.addColorStop(1, 'rgba(120,205,255,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  function makeRippleTex() {
+    const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+    x.clearRect(0, 0, 128, 128); x.strokeStyle = 'rgba(255,255,255,0.55)';
+    for (let i = 0; i < 18; i++) { x.lineWidth = 1 + Math.random() * 1.6; x.beginPath(); x.arc(Math.random() * 128, Math.random() * 128, 5 + Math.random() * 24, 0, Math.PI * 2); x.stroke(); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.center.set(0.5, 0.5); return t;
+  }
+  // proportions calibrées (unités locales du modèle, centre = 0 ; hauteur ~1.11)
+  const FW = { BASIN_Y: -0.15, BASIN_IN: 0.34, BASIN_R: 0.72, BOWL_Y: 0.28, BOWL_R: 0.24, SPOUT_Y: 0.34, JT_R: 0.37, JT_Y: 0.42, LAND_R: 0.55 };
+  function buildFountainWater(m, s) {
+    const grp = new THREE.Group(); grp.name = 'WATER'; const jets = [], ripples = [];
+    const dropMat = new THREE.PointsMaterial({ map: _dropTex, size: 0.09 * s, transparent: true, depthWrite: false, opacity: 0.95, blending: THREE.NormalBlending, sizeAttenuation: true, color: 0xcdeeff });
+    // jet central (colonne bien fournie qui fane légèrement)
+    const cN = 80, cPos = new Float32Array(cN * 3), cPh = new Float32Array(cN);
+    for (let i = 0; i < cN; i++) cPh[i] = i / cN;
+    const cGeo = new THREE.BufferGeometry(); cGeo.setAttribute('position', new THREE.BufferAttribute(cPos, 3));
+    const cPts = new THREE.Points(cGeo, dropMat); cPts.frustumCulled = false; grp.add(cPts);
+    jets.push({ type: 'c', pos: cPos, ph: cPh, geo: cGeo });
+    // 8 cascades latérales = RUBANS épais (plusieurs brins) tout autour → masquent les jets figés
+    for (let k = 0; k < 8; k++) {
+      const ang = k * Math.PI / 4, strands = 5, perStrand = 10, sN = strands * perStrand;
+      const pos = new Float32Array(sN * 3), ph = new Float32Array(sN), off = new Float32Array(sN);
+      let idx = 0;
+      for (let a = 0; a < strands; a++) for (let b = 0; b < perStrand; b++) { ph[idx] = b / perStrand + a * 0.015; off[idx] = (a - (strands - 1) / 2) / (strands - 1); idx++; }
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const pts = new THREE.Points(geo, dropMat); pts.frustumCulled = false; grp.add(pts);
+      jets.push({ type: 's', ang: ang, pos: pos, ph: ph, off: off, geo: geo });
+    }
+    // ondulations : ANNEAU pour le bassin (couvre toute l'eau, pas le pilier) + disque pour la vasque haute
+    const rings = [
+      { geo: new THREE.RingGeometry(FW.BASIN_IN, FW.BASIN_R, 48), Y: FW.BASIN_Y },
+      { geo: new THREE.CircleGeometry(FW.BOWL_R, 28), Y: FW.BOWL_Y }
+    ];
+    for (const r of rings) {
+      const mat = new THREE.MeshBasicMaterial({ map: makeRippleTex(), transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide, color: 0xdff4ff });
+      const d = new THREE.Mesh(r.geo, mat); d.rotation.x = -Math.PI / 2; d.position.y = r.Y + 0.008; grp.add(d);
+      ripples.push(d);
+    }
+    m.add(grp);
+    return { jets: jets, ripples: ripples };
+  }
+  function updateFountainWater(w, time) {
+    const t = time * 0.001;
+    for (const j of w.jets) {
+      const p = j.pos, n = j.ph.length;
+      if (j.type === 'c') {
+        for (let i = 0; i < n; i++) { const f = (j.ph[i] + t * 0.8) % 1, y = FW.SPOUT_Y + 0.30 * 4 * f * (1 - f), r = 0.02 + 0.12 * f, a = i * 2.399; p[i * 3] = Math.cos(a) * r; p[i * 3 + 1] = y; p[i * 3 + 2] = Math.sin(a) * r; }
+      } else {
+        const ca = Math.cos(j.ang), sa = Math.sin(j.ang), tx = -sa, tz = ca;   // tangente horizontale (largeur du ruban)
+        for (let i = 0; i < n; i++) { const f = (j.ph[i] + t * 0.7) % 1, r = FW.JT_R + (FW.LAND_R - FW.JT_R) * f, y = FW.JT_Y + (FW.BASIN_Y - FW.JT_Y) * (f * f), band = 0.11 * j.off[i]; p[i * 3] = ca * r + tx * band; p[i * 3 + 1] = y; p[i * 3 + 2] = sa * r + tz * band; }
+      }
+      j.geo.attributes.position.needsUpdate = true;
+    }
+    for (let i = 0; i < w.ripples.length; i++) { const mp = w.ripples[i].material.map; if (mp) { mp.offset.x = Math.sin(t * 0.3 + i) * 0.06; mp.offset.y = (t * 0.04 * (i + 1)) % 1; mp.rotation = t * 0.08 * (i ? -1 : 1); } w.ripples[i].material.opacity = 0.24 + 0.1 * Math.sin(t * 1.4 + i * 2); }
+  }
+  new GLTFLoader().load('models/fountain.glb?v=1', function (gltf) {
+    const base = gltf.scene; base.traverse(o => { if (o.isMesh && o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
+    assetBase.fountain = base;                            // dispo dans l'éditeur (eau ajoutée à la pose)
+  });
+
+  // helper : poser un modèle importé avec sa base sur l'herbe (y=0)
+  function groundOffset(obj) { return -new THREE.Box3().setFromObject(obj).min.y; }
+
+  // --- Barrières rouge/blanc : chargées comme BASE pour la palette éditeur (plus placées par défaut) ---
+  new GLTFLoader().load('models/barrier.glb?v=1', function (gltf) {
+    const base = gltf.scene;
+    base.traverse(o => { if (o.isMesh) { const mats = Array.isArray(o.material) ? o.material : [o.material]; for (const mt of mats) if (mt) mt.side = THREE.DoubleSide; } });
+    assetBase.barrier = base;                          // dispo dans l'éditeur (à poser toi-même)
+  });
+
+  // ============================================================
+  //  TRAFIC : voitures qui FONCENT vers le joueur (à esquiver) — voie gauche/droite au hasard, collision = MORT
+  // ============================================================
+  const cars = [];                                     // trafic MIXTE (voitures + bus), chacun ses dimensions
+  const CAR_LANES = [-1.5, 1.5];                       // centres des 2 voies (route w=6)
+  const CAR_MODEL_YAW = 0, BUS_MODEL_YAW = 0;          // les modèles regardent -X (avant vers le joueur)
+  let carBaseBox = null, busBaseBox = null, trafficScale = 0.85, busScale = 1.1;
+  function vehDims(v) {   // recalcule collisions/sol d'UN véhicule selon sa boîte + son échelle
+    const b = v.box, s = v.scale;
+    v.groundY = -b.min.y * s; v.top = (b.max.y - b.min.y) * s;
+    v.halfX = (b.max.x - b.min.x) / 2 * s; v.halfZ = (b.max.z - b.min.z) / 2 * s; v.minGap = v.halfX * 2 + 3;
+    v.mesh.scale.setScalar(s); v.mesh.position.y = v.groundY;
+  }
+  function setTrafficScale(s) { trafficScale = s; for (const v of cars) if (v.kind === 'car' && v.box) { v.scale = s; vehDims(v); } }
+  function setBusScale(s) { busScale = s; for (const v of cars) if (v.kind === 'bus' && v.box) { v.scale = s; vehDims(v); } }
+  function respawnCar(v, x) {
+    v.lane = Math.random() < 0.5 ? 0 : 1;
+    let px = x != null ? x : (hero.position.x + 30 + Math.random() * 40);
+    for (const o of cars) { const gap = Math.max(v.minGap || 5, o.minGap || 5); if (o !== v && o.lane === v.lane && Math.abs(o.mesh.position.x - px) < gap) px = o.mesh.position.x + gap + Math.random() * 12; }   // jamais coller deux véhicules
+    v.mesh.position.set(px, v.groundY, CAR_LANES[v.lane]);
+    v.speed = 5 + Math.random() * 4;
+  }
+  new GLTFLoader().load('models/car.glb', function (gltf) {
+    const base = gltf.scene; dside(base);
+    assetBase.car = base;                                // palette (pristine) → tu règles la taille toi-même
+    carBaseBox = new THREE.Box3().setFromObject(base);
+    for (let i = 0; i < 5; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); const v = { mesh: m, box: carBaseBox, kind: 'car', scale: trafficScale }; cars.push(v); vehDims(v); }
+    for (let i = 0; i < cars.length; i++) if (cars[i].kind === 'car') respawnCar(cars[i], hero.position.x + 12 + i * 16);
+  });
+  new GLTFLoader().load('models/bus.glb', function (gltf) {
+    const base = gltf.scene; dside(base);
+    assetBase.bus = base;                                // dispo aussi dans l'éditeur
+    busBaseBox = new THREE.Box3().setFromObject(base);
+    for (let i = 0; i < 2; i++) { const m = base.clone(true); m.rotation.y = BUS_MODEL_YAW; scene.add(m); const v = { mesh: m, box: busBaseBox, kind: 'bus', scale: busScale }; cars.push(v); vehDims(v); respawnCar(v, hero.position.x + 45 + i * 35); }
+  });
+  // Fumée d'échappement = PARTICULES douces (billboards avec dégradé radial)
+  const smoke = [];
+  { const sc = document.createElement('canvas'); sc.width = sc.height = 64; const sx = sc.getContext('2d');
+    const gr = sx.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(225,227,230,0.95)'); gr.addColorStop(0.45, 'rgba(205,208,213,0.4)'); gr.addColorStop(1, 'rgba(205,208,213,0)');
+    sx.fillStyle = gr; sx.fillRect(0, 0, 64, 64);
+    const smokeTex = new THREE.CanvasTexture(sc);
+    for (let i = 0; i < 120; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0, depthWrite: false, color: 0xd0d4d8 })); s.visible = false; s.userData = { life: 0, vx: 0, vy: 0, vz: 0 }; scene.add(s); smoke.push(s); } }
+
+  // ============================================================
+  //  PIÉTON (kid Toy Story) : se balade sur le trottoir → marche vers un passage piéton →
+  //  TRAVERSE ; pendant la traversée les voitures s'arrêtent, puis repartent.
+  // ============================================================
+  const peds = [];
+  let crossBlock = { active: false, x: 0, halfW: 2.5 }, pedScale = 1, strollerScale = 1;
+  const PED_SPEED = 1.5, PED_H = 0.62, PED_MODEL_YAW = 0;
+  function pedGroundH(z) {   // hauteur du sol sous le piéton : chaussée / trottoir surélevé / herbe (transition douce à la bordure)
+    const az = Math.abs(z), edge = ROAD.w / 2, ramp = 0.55;   // bordure chaussée↔trottoir
+    if (az <= edge) return 0.012;                             // sur la route
+    if (az < edge + ramp) return 0.012 + (ROAD.sideH - 0.012) * (az - edge) / ramp;   // PENTE de la bordure (montée/descente douce)
+    if (az <= ROAD.w / 2 + ROAD.sideW) return ROAD.sideH;     // sur le trottoir (surélevé)
+    return 0;                                                 // herbe
+  }
+  function setPedScale(s) {   // taille réglable dans l'éditeur (multiplie l'échelle de base)
+    pedScale = Math.max(0.3, Math.min(3, s));
+    for (const p of peds) { p.mesh.scale.setScalar(p.fit * pedScale); p.mesh.position.y = 0; p.mesh.updateMatrixWorld(true); p.footOffset = -new THREE.Box3().setFromObject(p.mesh).min.y; if (p.stroller && p.strollerFit) p.stroller.scale.setScalar(p.strollerFit * pedScale); }
+  }
+  function applyPedScale(s) { const go = () => { if (peds.length) setPedScale(s); else setTimeout(go, 400); }; go(); }
+  const sideZ = (sgn) => ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);     // centre d'un trottoir
+  function nearestCrosswalk(x) {                                          // passage piéton le plus proche : {x, halfW} ou null
+    let best = null, bd = 1e9;
+    for (const rec of EDIT.placed) if (rec.type === 'crosswalk') { const d = Math.abs(rec.mesh.position.x - x); if (d < bd) { bd = d; best = rec; } }
+    if (!best) return null;
+    const bb = new THREE.Box3().setFromObject(best.mesh);
+    return { x: best.mesh.position.x, halfW: (bb.max.x - bb.min.x) / 2 };   // demi-largeur des bandes le long de la route
+  }
+  // pose "pousser" des bras (delta appliqué par-dessus la pose de repos) — ajustable
+  const ARM_POSE = { LeftArm: [0.22, 0, 1.30], RightArm: [0.22, 0, -1.30], LeftForeArm: [0, 0, 0.36], RightForeArm: [0, 0, -0.36] };   // calibré en atelier
+  const STROLLER_DIST = 0.39, STROLLER_H = 0.41, STROLLER_YAW = 95 * Math.PI / 180, STROLLER_YOFF = -0.01;   // calibré en atelier
+  function setStrollerScale(s) {   // taille de la poussette réglable dans l'éditeur (indépendante de la taille piéton)
+    strollerScale = Math.max(0.3, Math.min(4, s));
+    for (const p of peds) if (p.stroller && p.strollerFit) p.stroller.scale.setScalar(p.strollerFit * strollerScale);   // le sol est recalculé chaque frame dans updatePeds
+  }
+  function applyStrollerScale(s) { const go = () => { let ok = false; for (const p of peds) if (p.stroller) ok = true; if (ok) setStrollerScale(s); else setTimeout(go, 400); }; go(); }
+  const _q = new THREE.Quaternion(), _e = new THREE.Euler();
+  function spawnPed(url, startX, startSide, opts) {
+    opts = opts || {};
+    new GLTFLoader().load(url, function (gltf) {
+      const root = gltf.scene; root.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
+      root.updateMatrixWorld(true);                                          // IMPORTANT : sinon la hauteur lue est minuscule → géant
+      const box0 = new THREE.Box3().setFromObject(root), h0 = (box0.max.y - box0.min.y) || 1, fit = PED_H / h0;
+      root.scale.setScalar(fit * pedScale);
+      const clip = gltf.animations[0];
+      clip.tracks = clip.tracks.filter(t => !/Hips\.position$/.test(t.name)); // strip root-motion → marche sur place
+      root.position.set(startX, 0, sideZ(startSide)); root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(root), footOffset = -box.min.y;
+      root.position.y = footOffset + ROAD.sideH;                             // départ sur le trottoir surélevé
+      scene.add(root);
+      const mixer = new THREE.AnimationMixer(root); mixer.clipAction(clip).play();
+      const p = { mesh: root, mixer, side: startSide, dir: 1, state: 'walk', crossTimer: 4 + Math.random() * 6, crossX: 0, fit: fit, footOffset: footOffset };
+      if (opts.stroller) {                                                   // bras figés en "pousser" + poussette devant
+        p.armBones = [];
+        root.traverse(o => { if (o.isBone && ARM_POSE[o.name]) { const d = ARM_POSE[o.name]; p.armBones.push({ bone: o, bind: o.quaternion.clone(), delta: new THREE.Quaternion().setFromEuler(new THREE.Euler(d[0], d[1], d[2])) }); } });
+        new GLTFLoader().load('models/stroller.glb', function (g2) {
+          const st = g2.scene; st.traverse(o => { if (o.isMesh) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
+          st.updateMatrixWorld(true);
+          const sb = new THREE.Box3().setFromObject(st), sh = (sb.max.y - sb.min.y) || 1; p.strollerFit = STROLLER_H / sh; p.strollerMinY = sb.min.y;
+          st.scale.setScalar(p.strollerFit * pedScale);   // suit la taille des piétons (garde le ratio de l'atelier)
+          scene.add(st); p.stroller = st;
+        });
+      }
+      peds.push(p);
+    });
+  }
+  spawnPed('models/kid.glb', -8, -1, {});
+  spawnPed('models/woman.glb', 6, 1, { stroller: true });
+  function updatePeds(dt) {
+    crossBlock.active = false;                             // recalculé chaque frame : actif si UN piéton traverse
+    for (const p of peds) {
+      p.mixer.update(dt);
+      let vx = 0, vz = 0;
+      if (p.state === 'walk') {
+        vx = p.dir;
+        p.mesh.position.x += p.dir * PED_SPEED * dt;
+        if (p.mesh.position.x > 52) { p.mesh.position.x = 52; p.dir = -1; }
+        if (p.mesh.position.x < -52) { p.mesh.position.x = -52; p.dir = 1; }
+        p.crossTimer -= dt;
+        if (p.crossTimer <= 0) {
+          const cw = nearestCrosswalk(p.mesh.position.x);
+          if (cw) { p.crossX = cw.x; p.crossHalfW = cw.halfW; p.state = 'goto'; p.dir = (cw.x > p.mesh.position.x) ? 1 : -1; }
+          else p.crossTimer = 3;                                         // aucun passage piéton posé → réessaie plus tard
+        }
+      } else if (p.state === 'goto') {                                   // rejoint le passage piéton sur le trottoir
+        vx = p.dir; p.mesh.position.x += p.dir * PED_SPEED * dt;
+        if (Math.abs(p.mesh.position.x - p.crossX) < 0.12) { p.mesh.position.x = p.crossX; p.state = 'cross'; }
+      } else {                                                           // cross : traverse la route → bloque les voitures
+        crossBlock.active = true; crossBlock.x = p.crossX; crossBlock.halfW = p.crossHalfW || 2.5;
+        const targetZ = sideZ(-p.side), s = Math.sign(targetZ - p.mesh.position.z);
+        vz = s; p.mesh.position.z += s * PED_SPEED * dt;
+        if (Math.abs(targetZ - p.mesh.position.z) < 0.06) { p.mesh.position.z = targetZ; p.side = -p.side; p.state = 'walk'; p.dir = Math.random() < 0.5 ? 1 : -1; p.crossTimer = 6 + Math.random() * 6; }
+      }
+      if (vx || vz) p.mesh.rotation.y = Math.atan2(vx, vz) + PED_MODEL_YAW;   // face au déplacement
+      p.mesh.position.y = p.footOffset + pedGroundH(p.mesh.position.z);       // suit trottoir/route/herbe
+      if (p.armBones) for (const a of p.armBones) a.bone.quaternion.copy(a.bind).multiply(a.delta);   // bras figés sur la barre (après l'anim)
+      if (p.stroller) {                                                       // poussette devant, avance avec la femme
+        const rot = p.mesh.rotation.y, fx = Math.sin(rot), fz = Math.cos(rot), dist = STROLLER_DIST * pedScale;
+        const foot = -(p.strollerMinY || 0) * (p.strollerFit * pedScale);   // bas du modèle → pose au sol (déterministe)
+        p.stroller.position.set(p.mesh.position.x + fx * dist, pedGroundH(p.mesh.position.z) + foot + STROLLER_YOFF * pedScale, p.mesh.position.z + fz * dist);
+        p.stroller.rotation.y = rot + STROLLER_YAW;
+      }
+    }
+  }
+  let smokeIdx = 0, smokeT = 0;
+
+  // --- Arbres low-poly (Poly Pizza) plantés ---
+  new GLTFLoader().load('models/pp_tree.glb', function (gltf) {
+    const base = gltf.scene;
+    const off = groundOffset(base);                 // hauteur à remonter pour poser la base au sol
+    treeBase = base; treeOffset = off;              // réutilisé pour le jardinage
+    assetBase.tree = base;                          // dispo dans l'éditeur (mais plus placés par défaut)
+    // (arbres par défaut retirés — à reposer via l'éditeur si voulu)
+  });
+
+  // --- Maison storybook (Poly Pizza) ---
+  // --- Chaumière (Poly Pizza) : chargée comme BASE pour la palette éditeur (plus placée par défaut) ---
+  new GLTFLoader().load('models/pp_cartoonhouse.glb', function (gltf) {
+    assetBase.cottage = gltf.scene;
+  });
+
+  // --- Maison-carotte (Meshy) : chargée comme BASE pour la palette éditeur (plus placée par défaut) ---
+  new GLTFLoader().load('models/carrot_meshy.glb?v=1', function (gltf) {
+    assetBase.carrot = gltf.scene;
+  });
+
+  // --- Maisons Meshy (chargées uniquement comme BASE pour la palette de l'éditeur) ---
+  ['house1', 'house2', 'bakery', 'windmill', 'lamp'].forEach(function (key) {
+    const file = key === 'bakery' ? 'house_bakery' : key;
+    new GLTFLoader().load('models/' + file + '.glb', function (gltf) {
+      const b = gltf.scene;
+      b.traverse(o => { if (o.isMesh) { const mats = Array.isArray(o.material) ? o.material : [o.material]; for (const mt of mats) if (mt) mt.side = THREE.DoubleSide; } });
+      assetBase[key] = b;
+    });
+  });
+
+  // --- MOULIN ANIMÉ : tour + pales séparées (les pales tournent) ---
+  const HUB = { x: 0.0, y: 0.45, z: 0.72 };    // position des pales sur la tour (à régler au rendu)
+  const BLADE_SCALE = 1.0;                       // taille des pales
+  function dside(o) { o.traverse(x => { if (x.isMesh) { const m = Array.isArray(x.material) ? x.material : [x.material]; for (const mt of m) if (mt) mt.side = THREE.DoubleSide; } }); }
+  new GLTFLoader().load('models/windmill2.glb', function (gt) {
+    dside(gt.scene);
+    new GLTFLoader().load('models/windmill2_blades.glb', function (gb) {
+      dside(gb.scene);
+      const blades = gb.scene; blades.name = 'BLADES';
+      blades.position.set(HUB.x, HUB.y, HUB.z); blades.scale.setScalar(BLADE_SCALE);
+      const grp = new THREE.Group();
+      grp.add(gt.scene); grp.add(blades);
+      assetBase.windmill2 = grp;
+    });
+  });
+
+  // ============================================================
+  //  JEU étape 2 : la BULLE irisée à souffler jusqu'au PORTAIL
+  //  (DÉSACTIVÉE pour l'instant : BUBBLE_ON = false — code gardé pour plus tard)
+  // ============================================================
+  const BUBBLE_ON = false;
+  const HOVER_Y = 1.4;                                    // la bulle flotte TOUJOURS à cette hauteur (ne tombe jamais)
+  const BUBBLE_START = new THREE.Vector3(0, HOVER_Y, -1.5);
+  const bubbleVel = new THREE.Vector3();
+  const _head = new THREE.Vector3(), _look = new THREE.Vector3(), _toB = new THREE.Vector3();
+  const bubble = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 32, 24),
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0, metalness: 0, transparent: true, opacity: 0.5, iridescence: 1, iridescenceIOR: 1.3, clearcoat: 1, transmission: 0 })
+  );
+  bubble.position.copy(BUBBLE_START);
+  scene.add(bubble);
+
+  let portalsDone = 0, bubbleWarpT = -1;
+  const PORTAL_POS = new THREE.Vector3(6, 1.6, 6);
+  const portal = new THREE.Mesh(
+    new THREE.TorusGeometry(0.9, 0.14, 16, 40),
+    new THREE.MeshStandardMaterial({ color: 0x3fe0d0, emissive: 0x36d8c8, emissiveIntensity: 1.6, roughness: 0.3 })
+  );
+  portal.position.copy(PORTAL_POS);
+  scene.add(portal);
+  const _plc = document.createElement('canvas'); _plc.width = 256; _plc.height = 64;
+  const _plx = _plc.getContext('2d'); _plx.fillStyle = '#fff'; _plx.font = 'bold 42px Trebuchet MS';
+  _plx.textAlign = 'center'; _plx.textBaseline = 'middle'; _plx.fillText('Portail', 128, 34);
+  const portalLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(_plc), transparent: true, depthTest: false }));
+  portalLabel.scale.set(1.5, 0.375, 1); portalLabel.renderOrder = 998; scene.add(portalLabel);
+  function movePortal() {                                 // repositionne le portail (aléatoire) à HAUTEUR de la bulle
+    const a = Math.random() * Math.PI * 2, r = 5 + Math.random() * 7;
+    PORTAL_POS.set(Math.cos(a) * r, HOVER_Y, Math.sin(a) * r);
+    portal.position.copy(PORTAL_POS);
+    portalLabel.position.set(PORTAL_POS.x, PORTAL_POS.y + 1.3, PORTAL_POS.z);
+  }
+  movePortal();
+
+  // Cône de souffle (retour visuel), attaché à la caméra, visible quand on souffle
+  const blowCone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.4, 1.3, 18, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xbfefff, transparent: true, opacity: 0.15, depthWrite: false, side: THREE.DoubleSide })
+  );
+  blowCone.rotation.x = -Math.PI / 2; blowCone.position.set(0, -0.05, -0.95); blowCone.visible = false;
+  camera.add(blowCone);
+  if (!BUBBLE_ON) { bubble.visible = false; portal.visible = false; portalLabel.visible = false; }   // bulle désactivée
+
+  // Éclatement de la bulle : gouttelettes irisées + son "pop"
+  const drops = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6),
+      new THREE.MeshPhysicalMaterial({ color: 0xcfefff, roughness: 0, transparent: true, opacity: 0.7, iridescence: 1 }));
+    d.visible = false; d.userData.vel = new THREE.Vector3(); scene.add(d); drops.push(d);
+  }
+  let bubblePopT = -1;
+  function popSound() {
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(720, t); o.frequency.exponentialRampToValueAtTime(120, t + 0.12);
+      g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.16);
+    } catch (e) {}
+  }
+  function popBubble() {
+    if (bubblePopT >= 0 || bubbleWarpT >= 0) return;
+    bubblePopT = 0; popSound();
+    for (const d of drops) {
+      d.position.copy(bubble.position);
+      d.userData.vel.set((Math.random() - 0.5) * 3, Math.random() * 2.5 + 1.5, (Math.random() - 0.5) * 3);
+      d.visible = true; d.material.opacity = 0.7;
+    }
+  }
+
+  // ============================================================
+  //  JEU étape 3 : JARDINAGE — planter (1 graine = 1 cristal ramassé)
+  // ============================================================
+  const growing = [];
+  function makeFlower() {
+    const g = new THREE.Group();
+    const col = [0xff6bb5, 0xffd23f, 0x9b5cff, 0xff7a5c, 0x5cc8ff][Math.floor(Math.random() * 5)];
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.5, 6),
+      new THREE.MeshStandardMaterial({ color: 0x3a8a3a, roughness: 1 }));
+    stem.position.y = 0.25; g.add(stem);
+    const center = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0xffe23f, emissive: 0xffb000, emissiveIntensity: 0.4, roughness: 0.6 }));
+    center.position.y = 0.5; g.add(center);
+    const pm = new THREE.MeshStandardMaterial({ color: col, roughness: 0.6, emissive: col, emissiveIntensity: 0.15 });
+    for (let i = 0; i < 6; i++) {
+      const a = i / 6 * Math.PI * 2;
+      const p = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), pm);
+      p.scale.set(1, 0.5, 1.6); p.position.set(Math.cos(a) * 0.11, 0.5, Math.sin(a) * 0.11);
+      g.add(p);
+    }
+    return g;
+  }
+  function plant() {
+    if (seeds <= 0) return;
+    seeds--; refreshHUD(); ding();
+    camera.getWorldPosition(_head); camera.getWorldDirection(_look); _look.y = 0;
+    if (_look.lengthSq() < 0.0001) _look.set(0, 0, -1);
+    _look.normalize();
+    const px = _head.x + _look.x * 2.5, pz = _head.z + _look.z * 2.5;
+    let obj, target, offset = 0;
+    const r = Math.random();
+    if (treeBase && r < 0.30) { obj = treeBase.clone(true); target = 1.8 + Math.random() * 0.6; offset = treeOffset; }
+    else if (mushroomBase && r < 0.65) { obj = mushroomBase.clone(true); target = 0.28 + Math.random() * 0.14; offset = 0.95; obj.userData.isMush = true; }
+    else { obj = makeFlower(); target = 0.8 + Math.random() * 0.5; }
+    obj.position.set(px, 0, pz);
+    obj.rotation.y = Math.random() * Math.PI * 2;
+    obj.scale.setScalar(0.001);
+    obj.userData.grow = { t: 0, target: target, offset: offset };
+    scene.add(obj); growing.push(obj);
+    if (obj.userData.isMush) { obj.userData.mush = { base: target, ph: Math.random() * 6.28 }; mushrooms.push(obj); }
+  }
+  addEventListener('keydown', (e) => { if (e.code === 'KeyG') plant(); });  // PC : G = planter
+
+  // ============================================================
+  //  PAPILLONS 3D (ailes qui battent, vol aléatoire) + traînée de bulle
+  // ============================================================
+  const butterflies = [];
+  function makeButterfly() {
+    const cols = [0xff6bb5, 0xffd23f, 0x9b5cff, 0x5cc8ff, 0xff7a5c, 0xff4fd0];
+    const c = cols[Math.floor(Math.random() * cols.length)];
+    const g = new THREE.Group();
+    const wingMat = new THREE.MeshStandardMaterial({ color: c, side: THREE.DoubleSide, roughness: 0.5, emissive: c, emissiveIntensity: 0.25 });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.02, 0.14, 3, 6), new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 }));
+    body.rotation.x = Math.PI / 2; g.add(body);   // corps le long de +Z
+    function wing(sign) {
+      const pivot = new THREE.Group();
+      const m = new THREE.Mesh(new THREE.CircleGeometry(0.14, 12), wingMat);
+      m.rotation.x = -Math.PI / 2; m.scale.set(1, 1, 1.5); m.position.x = sign * 0.14;
+      pivot.add(m); g.add(pivot); return pivot;
+    }
+    g.userData = {
+      lw: wing(1), rw: wing(-1),
+      cx: (Math.random() - 0.5) * 18, cz: (Math.random() - 0.5) * 18,
+      r: 1.5 + Math.random() * 4, baseY: 1 + Math.random() * 2.5,
+      sp: 0.3 + Math.random() * 0.5, ph: Math.random() * 6.28, px: 0, pz: 0
+    };
+    return g;
+  }
+  for (let i = 0; i < 8; i++) { const b = makeButterfly(); butterflies.push(b); scene.add(b); }
+
+  const trail = []; let trailIdx = 0, trailT = 0;
+  for (let i = 0; i < 12; i++) {
+    const tm = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0, depthWrite: false }));
+    tm.visible = false; scene.add(tm); trail.push(tm);
+  }
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // ============================================================
+  //  JEU : collecte des cristaux — HUD + son + état
+  // ============================================================
+  let collected = 0, totalCrystals = 0, seeds = 0, goldCoins = 0;
+  let mushroomBase = null, treeBase = null, treeOffset = 0;
+  const _chest = new THREE.Vector3();
+
+  // HUD compteur (attaché à la caméra → visible en VR, mobile et PC)
+  const hudCanvas = document.createElement('canvas'); hudCanvas.width = 512; hudCanvas.height = 140;
+  const hudCtx = hudCanvas.getContext('2d');
+  const hudTex = new THREE.CanvasTexture(hudCanvas);
+  const hud = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.46, 0.126),
+    new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false })
+  );
+  hud.position.set(0, -0.34, -1.05); hud.renderOrder = 999;
+  camera.add(hud);
+  function updateHUD(msg) {
+    hudCtx.clearRect(0, 0, 512, 140);
+    hudCtx.fillStyle = 'rgba(18,18,38,0.55)'; hudCtx.fillRect(0, 0, 512, 140);
+    hudCtx.fillStyle = '#eaf2ff';
+    hudCtx.textAlign = 'center'; hudCtx.textBaseline = 'middle';
+    let fs = 60;                                              // auto-ajuste la taille pour que 3 compteurs tiennent
+    do { hudCtx.font = 'bold ' + fs + 'px Trebuchet MS, sans-serif'; if (hudCtx.measureText(msg).width <= 496) break; fs -= 4; } while (fs > 24);
+    hudCtx.fillText(msg, 256, 72);
+    hudTex.needsUpdate = true;
+  }
+  let hudBase = 'Cristaux 0 / …', hudFlashUntil = 0;
+  function refreshHUD() {
+    hudBase = 'Cristaux ' + collected + '/' + totalCrystals + '   Graines ' + seeds + '   Or ' + goldCoins;
+    if (!hudFlashUntil) updateHUD(hudBase);
+  }
+  updateHUD(hudBase);
+
+  // Son de ramassage (synthétisé, aucun fichier)
+  let actx = null;
+  function ding() {
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(880, t); o.frequency.exponentialRampToValueAtTime(1650, t + 0.12);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.32);
+    } catch (e) {}
+  }
+  function chime() {   // petit arpège de réussite (portail)
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      [660, 880, 1320].forEach((fr, i) => {
+        const t = actx.currentTime + i * 0.09, o = actx.createOscillator(), g = actx.createGain();
+        o.type = 'sine'; o.frequency.setValueAtTime(fr, t);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+        o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.3);
+      });
+    } catch (e) {}
+  }
+  addEventListener('touchstart', () => { if (actx && actx.state === 'suspended') actx.resume(); });
+  addEventListener('click', () => { if (actx && actx.state === 'suspended') actx.resume(); });
+
+  // --- MICRO : souffler pour de vrai (optionnel) ---
+  let micReady = false, micLevel = 0, micBlow = false, analyser = null, micData = null;
+  const MIC_THRESHOLD = 0.22;
+  const micTxt = document.createElement('div');
+  micTxt.style.cssText = 'position:fixed;top:76px;left:50%;transform:translateX(-50%);z-index:40;color:#cff;font-size:13px;text-shadow:0 1px 3px #000;';
+  const micMeter = document.createElement('div');
+  micMeter.style.cssText = 'position:fixed;top:54px;left:50%;transform:translateX(-50%);z-index:40;width:220px;height:14px;border-radius:8px;background:rgba(255,255,255,.15);overflow:hidden;display:none;';
+  const micFill = document.createElement('div');
+  micFill.style.cssText = 'height:100%;width:0%;background:linear-gradient(90deg,#5cf,#3fe0d0);transition:width .05s;';
+  micMeter.appendChild(micFill);
+  const micBtn = document.createElement('button');
+  micBtn.textContent = '🎤 Activer le souffle (micro)';
+  micBtn.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:40;padding:10px 18px;border-radius:22px;border:2px solid #7fd;background:rgba(20,30,60,.85);color:#cff;font-size:15px;cursor:pointer;';
+  function micStatus(s) { micTxt.textContent = s; }
+  function enableMic() {
+    if (micReady) { micStatus('🎤 Micro déjà actif'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micStatus('🎤 Micro indisponible'); return; }
+    micStatus('🎤 Autorisation…');
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .then(function (stream) {
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+        if (actx.state === 'suspended') actx.resume();
+        const src = actx.createMediaStreamSource(stream);
+        analyser = actx.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.4;
+        micData = new Uint8Array(analyser.frequencyBinCount);
+        src.connect(analyser); micReady = true;
+        micMeter.style.display = 'block'; micBtn.style.display = 'none';
+        micStatus('🎤 Micro ACTIF — souffle "ffff" vers la bulle !');
+      })
+      .catch(function () { micStatus('🎤 Micro refusé — autorise-le puis recharge'); });
+  }
+  micBtn.addEventListener('click', enableMic);
+  micBtn.addEventListener('touchstart', function (e) { enableMic(); e.preventDefault(); }, { passive: false });
+  document.body.appendChild(micBtn); document.body.appendChild(micMeter); document.body.appendChild(micTxt);
+  if (!BUBBLE_ON) micBtn.style.display = 'none';         // bulle désactivée → pas de bouton micro
+
+  // --- Pilotage de la boucle du jeu ---
+  // Hors VR (desktop) : game.js pilote sa propre boucle via window.requestAnimationFrame → on ne touche à rien.
+  // En VR : le requestAnimationFrame de la fenêtre est GELÉ pendant la session immersive, donc la boucle
+  //         de game.js s'arrête. On l'avance alors nous-mêmes à chaque frame casque via window.loop(time),
+  //         et on neutralise son auto-planification (sinon double exécution à la sortie de VR).
+  let presenting = false;
+  const realRAF = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = function (cb) { return presenting ? 0 : realRAF(cb); };
+  renderer.xr.addEventListener('sessionstart', () => { presenting = true; if (controls) controls.enabled = false; try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {} try { if (window.__startMusic) window.__startMusic(); } catch (e) {} });
+  renderer.xr.addEventListener('sessionend', () => { presenting = false; player.position.set(0, 0, 0); player.rotation.set(0, 0, 0); if (controls) controls.enabled = true; if (typeof window.loop === 'function') realRAF(window.loop); });
+
+  // ============================================================
+  //  ENTRÉES + DEUX MODES
+  //  • PLAY    : stick gauche = fantôme, stick droit = viser, gâchette = souffler
+  //  • EXPLORE : stick gauche = SE DÉPLACER, stick droit = pivoter (par crans)
+  //  Bouton A/B (ou X/Y) = bascule entre les deux modes.
+  // ============================================================
+  let mode = 'play';
+  let prevToggle = false, prevSnap = 0, lastT = 0, prevGrip = false;
+  const _up = new THREE.Vector3(0, 1, 0), _fwd = new THREE.Vector3(), _rightv = new THREE.Vector3();
+
+  function updateVR(time) {
+    const session = renderer.xr.getSession();
+    if (!session) return;
+    const dt = lastT ? Math.min(0.05, (time - lastT) / 1000) : 0.016; lastT = time;
+
+    let lx = 0, ly = 0, rx = 0, ry = 0, toggle = false, blow = false, grip = false;
+    for (const src of session.inputSources) {
+      const gp = src.gamepad; if (!gp) continue;
+      const a = gp.axes || [], b = gp.buttons || [];
+      const sx = a.length >= 4 ? a[2] : (a[0] || 0);
+      const sy = a.length >= 4 ? a[3] : (a[1] || 0);
+      if (src.handedness === 'right') { rx = sx; ry = sy; } else { lx = sx; ly = sy; }
+      if (b[0] && (b[0].pressed || b[0].value > 0.15)) blow = true;   // gâchette (sensible)
+      if (b[1] && b[1].pressed) grip = true;                          // grip = planter
+      if ((b[4] && b[4].pressed) || (b[5] && b[5].pressed)) toggle = true; // A/B/X/Y
+    }
+
+    if (toggle && !prevToggle) { if (GAME_ENABLED) mode = (mode === 'play') ? 'explore' : 'play'; else jump(); } // A/B : saut
+    prevToggle = toggle;
+    if (grip && !prevGrip) plant();                            // grip (front montant) = planter
+    prevGrip = grip;
+    vrTrigger = blow;                                          // gâchette = souffler
+
+    if (GAME_ENABLED && mode === 'play') {
+      const mv = (Math.hypot(lx, ly) > 0.18) ? { x: lx, y: ly } : null;
+      const aim = (Math.hypot(rx, ry) > 0.5) ? { x: rx, y: ry } : null;
+      if (window.__vrInput) window.__vrInput(mv, aim, blow);
+    } else {
+      // PERSO type RUNNER : STRAFE relatif à CE QUE TU REGARDES (casque) → gauche/droite toujours cohérent avec ta vue.
+      if (GAME_ENABLED && window.__vrInput) window.__vrInput(null, null, false);
+      camera.getWorldDirection(_fwd); _fwd.y = 0;                  // direction du regard (casque), à plat
+      if (_fwd.lengthSq() < 1e-4) _fwd.set(0, 0, -1);
+      _fwd.normalize();
+      _rightv.crossVectors(_fwd, _up).normalize();                // droite par rapport à ta vue
+      heroMoving = Math.hypot(lx, ly) > 0.15 && heroFallT <= 0 && heroDeadT <= 0 && !heroCar;   // idle si porté par une voiture
+      if (heroMoving) {
+        hero.position.addScaledVector(_fwd, -ly * HERO_SPEED * dt);   // avant = où tu regardes
+        hero.position.addScaledVector(_rightv, lx * HERO_SPEED * dt); // strafe G/D relatif à ta vue
+      }
+      const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;          // stick droit = pivote le perso (caméra suit derrière)
+      if (snap && !prevSnap) hero.rotation.y -= snap * Math.PI / 8;
+      prevSnap = snap;
+    }
+  }
+
+  // ============================================================
+  //  ÉDITEUR (PC souris) — touche E : poser / déplacer / tourner / redimensionner / supprimer
+  //  Sauvegarde dans Supabase (partagé PC↔casque) + localStorage (secours). Table dédiée wispy_layout.
+  // ============================================================
+  const EDIT_TYPES = {
+    house1:   { label: '🏡 Maison 1',       s: 2.8 },
+    house2:   { label: '🏘️ Maison 2',       s: 2.8 },
+    bakery:   { label: '🥐 Boulangerie',    s: 2.8 },
+    windmill: { label: '🌬️ Moulin',         s: 2.8 },
+    windmill2:{ label: '🌀 Moulin animé',   s: 2.8 },
+    lamp:     { label: '🏮 Lampadaire',      s: 1.6 },
+    carrot:   { label: '🥕 Maison carotte', s: 3.2 },
+    cottage:  { label: '🏠 Chaumière',      s: 2.2 },
+    mushroom: { label: '🍄 Champignon',     s: 0.32 },
+    tree:     { label: '🌳 Arbre',          s: 2.2 },
+    barrier:  { label: '🚧 Barrière',       s: 1.0 },
+    path:     { label: '🚪 Allée / entrée', s: 1.0 },
+    paving:   { label: '🧱 Dalle (sol)',     s: 1.0 },
+    crosswalk:{ label: '🦓 Passage piéton',  s: 1.0 },
+    fountain: { label: '⛲ Fontaine',        s: 2.2 },
+  };
+  const _eray = new THREE.Raycaster(), _emouse = new THREE.Vector2(), _eplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _ehit = new THREE.Vector3();
+  let editRing = null;
+
+  function editHitGround(e) {
+    const r = renderer.domElement.getBoundingClientRect();
+    _emouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    _eray.setFromCamera(_emouse, camera);
+    return _eray.ray.intersectPlane(_eplane, _ehit) ? _ehit : null;
+  }
+  function editPick(e) {
+    const r = renderer.domElement.getBoundingClientRect();
+    _emouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    _eray.setFromCamera(_emouse, camera);
+    const hits = _eray.intersectObjects(EDIT.placed.map(p => p.mesh), true);
+    if (!hits.length) return null;
+    let o = hits[0].object; while (o && !EDIT.placed.find(p => p.mesh === o)) o = o.parent;
+    return EDIT.placed.find(p => p.mesh === o) || null;
+  }
+  function editSpawn(type, x, z, rotY, scale, select) {
+    const base = assetBase[type]; if (!base) return null;
+    const m = base.clone(true);
+    const s = scale != null ? scale : (EDIT_TYPES[type] ? EDIT_TYPES[type].s : 1);
+    m.scale.setScalar(s);
+    m.rotation.y = rotY || 0;
+    m.position.set(x, 0, z); editGroundize(m);
+    if (type === 'crosswalk') m.position.y = 0.014;      // pile posé sur la surface de la route (pas surélevé)
+    scene.add(m);
+    const rec = { type, mesh: m, scale: s, blades: m.getObjectByName('BLADES') };   // pales à faire tourner
+    if (type === 'fountain') rec.water = buildFountainWater(m, s);                   // eau animée par-dessus la fontaine
+    EDIT.placed.push(rec);
+    if (GROUND_TYPES[type]) applyGroundMask();                                       // masque l'herbe sous les dalles/passages/allées
+    if (select) editSelect(rec);
+    return rec;
+  }
+  // masque les brins d'herbe sous les objets de sol posés (dalle, passage piéton, allée)
+  const GROUND_TYPES = { paving: true, crosswalk: true, path: true };
+  const _zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
+  function applyGroundMask() {
+    if (!grassMesh || !grassOrig) return;
+    const boxes = [];
+    for (const rec of EDIT.placed) if (GROUND_TYPES[rec.type]) boxes.push(new THREE.Box3().setFromObject(rec.mesh));
+    for (let i = 0; i < grassOrig.length; i++) {
+      const x = grassXZ[i * 2], z = grassXZ[i * 2 + 1]; let hide = false;
+      for (const b of boxes) { if (x >= b.min.x && x <= b.max.x && z >= b.min.z && z <= b.max.z) { hide = true; break; } }
+      grassMesh.setMatrixAt(i, hide ? _zeroMat : grassOrig[i]);
+    }
+    grassMesh.instanceMatrix.needsUpdate = true;
+  }
+  function editSelect(rec) {
+    EDIT.sel = rec;
+    if (!editRing) { editRing = new THREE.Mesh(new THREE.TorusGeometry(1, 0.05, 8, 32), new THREE.MeshBasicMaterial({ color: 0x36e0d0, depthTest: false })); editRing.rotation.x = -Math.PI / 2; editRing.renderOrder = 999; scene.add(editRing); }
+    editRing.visible = !!rec;
+    if (rec) { const bb = new THREE.Box3().setFromObject(rec.mesh); editRing.scale.setScalar(Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 + 0.3); editRing.position.set(rec.mesh.position.x, 0.06, rec.mesh.position.z); }
+  }
+  function editGroundize(m) { m.position.y = 0; m.position.y = -new THREE.Box3().setFromObject(m).min.y; }   // pose la base au sol (indépendant de la position actuelle)
+  function editReground(rec) { rec.mesh.scale.setScalar(rec.scale); editGroundize(rec.mesh); if (rec.type === 'crosswalk') rec.mesh.position.y = 0.014; editSelect(rec); if (GROUND_TYPES[rec.type]) applyGroundMask(); }
+  function editDelete() { if (!EDIT.sel) return; const wasGround = GROUND_TYPES[EDIT.sel.type]; scene.remove(EDIT.sel.mesh); EDIT.placed = EDIT.placed.filter(r => r !== EDIT.sel); EDIT.sel = null; if (editRing) editRing.visible = false; if (wasGround) applyGroundMask(); editSave(); }
+  function editSerialize() { return EDIT.placed.map(r => ({ type: r.type, x: +r.mesh.position.x.toFixed(2), z: +r.mesh.position.z.toFixed(2), rotY: +r.mesh.rotation.y.toFixed(3), scale: +r.scale.toFixed(3) })); }
+  function editSave(opts) {
+    // SURF = LECTURE SEULE : on ne modifie JAMAIS le village (ni Supabase ni localStorage partagé)
+    return Promise.resolve();
+  }
+
+  // charge un layout (retry tant que les modèles ne sont pas prêts) — ignore les anciennes voitures posées
+  function editApplyLayout(layout) {
+    if (!layout || !layout.length) return;
+    const done = layout.map(() => false); let duplicated = false;
+    (function attempt() {
+      let all = true;
+      layout.forEach((d, i) => { if (!done[i]) { if (d.type === 'car') { done[i] = true; return; } if (assetBase[d.type]) { editSpawn(d.type, d.x, d.z, d.rotY, d.scale, false); done[i] = true; } else all = false; } });
+      if (!all) setTimeout(attempt, 700);
+      else if (!duplicated) { duplicated = true; duplicateVillage(); }
+    })();
+  }
+  // TEST : recopie le village posé pour remplir la route allongée (clones décoratifs, PAS ajoutés à EDIT.placed → non sauvegardés)
+  function duplicateVillage() {
+    const SHIFT = 58, originals = EDIT.placed.slice();
+    for (const rec of originals) for (const dx of [-SHIFT, SHIFT]) {
+      const c = rec.mesh.clone(true); c.position.x = rec.mesh.position.x + dx; scene.add(c);
+    }
+  }
+  function applyCarScale(s) { const go = () => { if (carBaseBox) setTrafficScale(s); else setTimeout(go, 400); }; go(); }   // attend le chargement de la voiture
+  function applyBusScale(s) { const go = () => { if (busBaseBox) setBusScale(s); else setTimeout(go, 400); }; go(); }       // attend le chargement du bus
+  function extractLayout(raw) {   // gère les 2 formats : tableau (ancien) OU {objects, carScale, pedScale}
+    if (Array.isArray(raw)) return { objects: raw, carScale: null, pedScale: null };
+    if (raw && typeof raw === 'object') return { objects: raw.objects || [], carScale: (raw.carScale != null ? raw.carScale : null), pedScale: (raw.pedScale != null ? raw.pedScale : null), strollerScale: (raw.strollerScale != null ? raw.strollerScale : null), busScale: (raw.busScale != null ? raw.busScale : null) };
+    return { objects: [], carScale: null, pedScale: null, strollerScale: null, busScale: null };
+  }
+  // au démarrage : Supabase (partagé) + localStorage, on prend le plus fourni (RÉCUPÉRATION si Supabase vidé)
+  (async () => {
+    let sbRaw = null, lsRaw = null;
+    try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); sbRaw = j && j[0] && j[0].data; } } catch (e) {}
+    try { lsRaw = JSON.parse(localStorage.getItem('wispy_layout') || 'null'); } catch (e) {}
+    const S = extractLayout(sbRaw), L = extractLayout(lsRaw);
+    let objects = S.objects, carScale = S.carScale, pedScl = S.pedScale, strScl = S.strollerScale, busScl = S.busScale;
+    if (L.objects.length > S.objects.length) {          // localStorage plus riche → on lit (SANS réécrire : surf = lecture seule)
+      objects = L.objects; if (L.carScale != null) carScale = L.carScale; if (L.pedScale != null) pedScl = L.pedScale; if (L.strollerScale != null) strScl = L.strollerScale; if (L.busScale != null) busScl = L.busScale;
+    }
+    if (carScale != null) applyCarScale(carScale);
+    if (busScl != null) applyBusScale(busScl);
+    if (pedScl != null) applyPedScale(pedScl);
+    // strollerScale ignoré au chargement : taille figée par la calibration atelier (STROLLER_H)
+    void strScl;
+    editApplyLayout(objects);
+  })();
+
+  // --- Interface éditeur ---
+  const edPanel = document.createElement('div');
+  edPanel.style.cssText = 'position:fixed;top:64px;left:12px;z-index:50;background:rgba(12,22,42,.92);border:2px solid #6fd;border-radius:12px;padding:10px;color:#dff;font:13px sans-serif;display:none;max-width:210px;';
+  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>🖐️ Main</b> = active puis glisse pour te déplacer partout · <b>◀ ● ▶</b> = aller début/centre/fin · <b>WASD</b> = déplacer · <b>molette</b> = zoom · <b>clic-droit</b> = tourner la vue · clic sol = poser · clic objet = sélectionner.<br>Objet sélectionné : <b>◄ ►</b> = tourner · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div style="margin-top:8px;display:flex;align-items:center;gap:4px;font-size:12px;"><button id="edHand" style="flex:2;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:13px;">🖐️ Main</button><button id="edGoStart" style="flex:1;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;" title="Début">◀</button><button id="edGoMid" style="flex:1;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;" title="Centre">●</button><button id="edGoEnd" style="flex:1;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;" title="Fin">▶</button></div><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edSave" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;border:0;background:#3fbf5a;color:#fff;font-weight:bold;cursor:pointer;font-size:14px;">💾 Sauvegarder</button><div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;">🚗 Taille voitures :<button id="edCarM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edCarP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">🚌 Taille bus :<button id="edBusM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edBusP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">🧍 Taille piéton :<button id="edPedM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edPedP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
+  document.body.appendChild(edPanel);
+  const edPal = edPanel.querySelector('#edPal');
+  function edHighlight() { [...edPal.children].forEach(c => c.style.background = c.dataset.t === EDIT.type ? '#36e0d0' : 'rgba(50,80,120,.5)'); }
+  for (const k in EDIT_TYPES) {
+    const b = document.createElement('button'); b.textContent = EDIT_TYPES[k].label; b.dataset.t = k;
+    b.style.cssText = 'padding:5px 7px;border-radius:6px;border:1px solid #6fd;color:#dff;cursor:pointer;font-size:12px;';
+    b.onclick = () => { EDIT.type = k; edHighlight(); };
+    edPal.appendChild(b);
+  }
+  edHighlight();
+  edPanel.querySelector('#edSave').onclick = () => {
+    const b = edPanel.querySelector('#edSave'), t0 = b.textContent; b.textContent = '⏳ Sauvegarde…'; b.disabled = true;
+    editSave({ force: true }).then((r) => { if (r && r.ok === false) throw 0; b.textContent = '✅ Sauvegardé !'; }).catch(() => { b.textContent = '⚠️ Échec, réessaie'; }).finally(() => { setTimeout(() => { b.textContent = t0; b.disabled = false; }, 1500); });
+  };
+  edPanel.querySelector('#edCarM').onclick = () => { setTrafficScale(Math.max(0.3, trafficScale * 0.9)); editSave(); };
+  edPanel.querySelector('#edCarP').onclick = () => { setTrafficScale(Math.min(3.5, trafficScale * 1.1)); editSave(); };
+  edPanel.querySelector('#edBusM').onclick = () => { setBusScale(Math.max(0.3, busScale * 0.9)); editSave(); };
+  edPanel.querySelector('#edBusP').onclick = () => { setBusScale(Math.min(4, busScale * 1.1)); editSave(); };
+  edPanel.querySelector('#edPedM').onclick = () => { setPedScale(pedScale * 0.9); editSave(); };
+  edPanel.querySelector('#edPedP').onclick = () => { setPedScale(pedScale * 1.1); editSave(); };
+  const edHandBtn = edPanel.querySelector('#edHand');
+  edHandBtn.onclick = () => { EDIT.handTool = !EDIT.handTool; edHandBtn.style.background = EDIT.handTool ? '#36e0d0' : 'rgba(50,80,120,.5)'; edHandBtn.style.color = EDIT.handTool ? '#023' : '#dff'; };
+  edPanel.querySelector('#edGoStart').onclick = () => { EDIT.tx = -26; EDIT.tz = 0; };
+  edPanel.querySelector('#edGoMid').onclick   = () => { EDIT.tx = 0;   EDIT.tz = 0; };
+  edPanel.querySelector('#edGoEnd').onclick   = () => { EDIT.tx = 26;  EDIT.tz = 0; };
+  edPanel.querySelector('#edDel').onclick = () => editDelete();
+  edPanel.querySelector('#edExport').onclick = () => { const s = JSON.stringify(editSerialize()); if (navigator.clipboard) navigator.clipboard.writeText(s); window.prompt('Placement (copié) :', s); };
+
+  const edBtn = document.createElement('button'); edBtn.textContent = '🛠️'; edBtn.title = 'Éditeur (touche E)';
+  edBtn.style.cssText = 'position:fixed;top:12px;left:12px;z-index:50;width:44px;height:44px;border-radius:10px;border:2px solid #6fd;background:rgba(12,22,42,.85);color:#dff;font-size:20px;cursor:pointer;';
+  edBtn.onclick = toggleEdit;
+  document.body.appendChild(edBtn);
+  function toggleEdit() {
+    EDIT.on = !EDIT.on;
+    edPanel.style.display = EDIT.on ? 'block' : 'none';
+    edBtn.style.background = EDIT.on ? '#36e0d0' : 'rgba(12,22,42,.85)';
+    EDIT.sel = null; if (editRing) editRing.visible = false; EDIT.hold = {}; EDIT.drag = EDIT.orbit = EDIT.pan = false;
+    if (EDIT.on && hero) { EDIT.tx = hero.position.x; EDIT.tz = hero.position.z; }   // centre la vue sur le perso
+    if (!EDIT.on) editSave();
+  }
+  addEventListener('keydown', (e) => {
+    if (e.code === 'KeyE' && !e.repeat) { toggleEdit(); return; }
+    if (!EDIT.on) return;
+    // PAN caméra : WASD MAINTENUS = déplacement continu (appliqué dans updateEditorCam)
+    if (e.code === 'KeyW' || e.code === 'KeyS' || e.code === 'KeyA' || e.code === 'KeyD') { EDIT.hold[e.code] = true; e.preventDefault(); return; }
+    if (e.code === 'Space') { EDIT.space = true; e.preventDefault(); return; }   // Espace maintenu = outil main (Photoshop)
+    if (EDIT.sel) {   // objet sélectionné : flèches = TOURNER (G/D, les 2 sens) et TAILLE (H/B)
+      if (e.code === 'ArrowLeft')  { EDIT.sel.mesh.rotation.y -= Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
+      if (e.code === 'ArrowRight') { EDIT.sel.mesh.rotation.y += Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
+      if (e.code === 'ArrowUp')    { EDIT.sel.scale *= 1.05; editReground(EDIT.sel); editSave(); e.preventDefault(); return; }
+      if (e.code === 'ArrowDown')  { EDIT.sel.scale *= 0.95; editReground(EDIT.sel); editSave(); e.preventDefault(); return; }
+      if (e.code === 'KeyR') { EDIT.sel.mesh.rotation.y += Math.PI / 12; editSelect(EDIT.sel); editSave(); return; }
+      if (e.code === 'Equal' || e.code === 'NumpadAdd') { EDIT.sel.scale *= 1.1; editReground(EDIT.sel); editSave(); return; }
+      if (e.code === 'Minus' || e.code === 'NumpadSubtract') { EDIT.sel.scale *= 0.9; editReground(EDIT.sel); editSave(); return; }
+      if (e.code === 'Delete' || e.code === 'Backspace') { editDelete(); return; }
+    } else {          // rien de sélectionné : les flèches pannent aussi (maintenues = continu)
+      const map = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD' };
+      if (map[e.code]) { EDIT.hold[map[e.code]] = true; e.preventDefault(); }
+    }
+  });
+  addEventListener('keyup', (e) => {   // relâche les touches de pan éditeur
+    const map = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD' };
+    if (EDIT.hold[e.code] !== undefined) EDIT.hold[e.code] = false;
+    if (map[e.code]) EDIT.hold[map[e.code]] = false;
+    if (e.code === 'Space') EDIT.space = false;
+  });
+  // souris éditeur (sur le canvas)
+  {
+    const dom = renderer.domElement;
+    dom.addEventListener('contextmenu', (e) => { if (EDIT.on) e.preventDefault(); });
+    dom.addEventListener('pointerdown', (e) => {
+      if (!EDIT.on) return;
+      EDIT.lx = e.clientX; EDIT.ly = e.clientY;
+      if (e.button === 2) { EDIT.orbit = true; return; }                       // clic droit = tourner la vue
+      if (e.button === 1 || EDIT.space || EDIT.handTool) { EDIT.pan = true; e.preventDefault(); return; }   // clic milieu / Espace / outil Main = déplacer la vue
+      const pick = editPick(e);
+      if (pick) { editSelect(pick); EDIT.drag = true; }                        // clic sur objet = sélectionne + déplace
+      else { const g = editHitGround(e); if (g) { editSelect(editSpawn(EDIT.type, g.x, g.z, 0, null, true)); EDIT.drag = true; } }  // clic sol = pose
+    });
+    dom.addEventListener('pointermove', (e) => {
+      if (!EDIT.on) return;
+      if (EDIT.orbit) { EDIT.yaw -= (e.clientX - EDIT.lx) * 0.006; EDIT.pitch = Math.max(0.25, Math.min(1.45, EDIT.pitch + (e.clientY - EDIT.ly) * 0.006)); EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
+      else if (EDIT.pan) { const dx = e.clientX - EDIT.lx, dy = e.clientY - EDIT.ly, s = EDIT.dist * 0.0024, fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw); EDIT.tx += (Math.cos(EDIT.yaw) * dx - fx * dy) * s; EDIT.tz += (-fx * dx - fz * dy) * s; EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
+      else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); if (EDIT.sel.type === 'crosswalk') EDIT.sel.mesh.position.y = 0.014; editSelect(EDIT.sel); } }
+    });
+    const edUp = () => { if (EDIT.drag && EDIT.sel && GROUND_TYPES[EDIT.sel.type]) applyGroundMask(); if (EDIT.drag || EDIT.orbit) editSave(); EDIT.drag = false; EDIT.orbit = false; EDIT.pan = false; };
+    dom.addEventListener('pointerup', edUp); dom.addEventListener('pointercancel', edUp);
+    dom.addEventListener('wheel', (e) => { if (!EDIT.on) return; EDIT.dist = Math.max(2.5, Math.min(80, EDIT.dist + Math.sign(e.deltaY) * Math.max(1.2, EDIT.dist * 0.12))); e.preventDefault(); }, { passive: false });
+  }
+  function updateEditorCam(dt) {
+    // PAN CONTINU (WASD/flèches maintenus) : rapide, proportionnel au zoom → traverse le plateau facilement
+    const sp = EDIT.dist * 1.6 * (dt || 0.016), fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw);
+    if (EDIT.hold.KeyW) { EDIT.tx -= fx * sp; EDIT.tz -= fz * sp; }
+    if (EDIT.hold.KeyS) { EDIT.tx += fx * sp; EDIT.tz += fz * sp; }
+    if (EDIT.hold.KeyA) { EDIT.tx -= fz * sp; EDIT.tz += fx * sp; }
+    if (EDIT.hold.KeyD) { EDIT.tx += fz * sp; EDIT.tz -= fx * sp; }
+    const cd = EDIT.dist * Math.cos(EDIT.pitch);
+    camera.position.set(EDIT.tx + Math.sin(EDIT.yaw) * cd, EDIT.dist * Math.sin(EDIT.pitch) + 1, EDIT.tz + Math.cos(EDIT.yaw) * cd);
+    camera.lookAt(EDIT.tx, 0.5, EDIT.tz);
+  }
+
+  let prevFrameT = 0;
+  renderer.setAnimationLoop((time) => {
+    const dt = prevFrameT ? Math.min(0.05, (time - prevFrameT) / 1000) : 0.016; prevFrameT = time;
+    for (const rec of EDIT.placed) { if (rec.blades) rec.blades.rotation.z += dt * 1.2; if (rec.water) updateFountainWater(rec.water, time); }   // moulins tournent + eau des fontaines coule
+    if (EDIT.on && !presenting) {                     // MODE ÉDITEUR : jeu gelé, caméra libre
+      updateEditorCam(dt);
+      if (grassWind) grassWind.value = time * 0.001;
+      renderer.render(scene, camera);
+      return;
+    }
+    if (presenting) {
+      updateVR(time);
+      if (GAME_ENABLED && typeof window.loop === 'function') window.loop(time);
+    } else {
+      // MOBILE + PC : MARCHE du perso relative à la caméra (joystick + WASD)
+      let mx = joyX, my = joyY;
+      if (kW) my -= 1; if (kS) my += 1; if (kA) mx -= 1; if (kD) mx += 1;   // clavier PC
+      const mag = Math.hypot(mx, my);
+      heroMoving = mag > 0.05 && heroFallT <= 0 && heroDeadT <= 0 && !heroCar;   // idle si porté par une voiture
+      if (heroMoving) {
+        if (mag > 1) { mx /= mag; my /= mag; }
+        const fwdX = -Math.sin(camYaw), fwdZ = -Math.cos(camYaw);   // avant = s'éloigner de la caméra
+        const rgtX = -fwdZ, rgtZ = fwdX;                            // droite caméra
+        let dx = fwdX * (-my) + rgtX * mx;
+        let dz = fwdZ * (-my) + rgtZ * mx;
+        const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+        hero.position.x += dx * HERO_SPEED * dt;
+        hero.position.z += dz * HERO_SPEED * dt;
+        const tgt = Math.atan2(dx, dz);                             // oriente le perso vers son déplacement
+        let d = tgt - hero.rotation.y;
+        while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+        hero.rotation.y += d * Math.min(1, dt * 12);
+      }
+    }
+    // GRAVITÉ + SAUT du perso (commun PC/mobile/VR) + limite du jardin
+    {
+      const prevY = hero.position.y; heroPrevY = prevY;               // y avant gravité (pour atterrir sur toits)
+      heroVelY -= HERO_GRAVITY * dt;
+      hero.position.y += heroVelY * dt;
+      heroOnGround = false;
+      let groundH = 0;                                                 // hauteur du sol (0, ou trottoir surélevé)
+      for (const pf of walkPlatforms) if (hero.position.x >= pf.x0 && hero.position.x <= pf.x1 && hero.position.z >= pf.z0 && hero.position.z <= pf.z1) groundH = Math.max(groundH, pf.h);
+      if (hero.position.y <= groundH) { hero.position.y = groundH; heroVelY = 0; heroOnGround = true; heroJumps = 0; }
+      const hpr = Math.hypot(hero.position.x, hero.position.z);
+      if (hpr > HERO_CLAMP) { hero.position.x *= HERO_CLAMP / hpr; hero.position.z *= HERO_CLAMP / hpr; }
+      // CHAMPIGNONS = obstacles-plateformes : on peut MONTER dessus, on ne peut pas les TRAVERSER ;
+      // si on CLIPPE le côté en SAUTANT → on TRÉBUCHE et on tombe de l'autre côté.
+      if (heroFallT <= 0) for (const o of mushroomObstacles) {
+        const ox = hero.position.x - o.x, oz = hero.position.z - o.z;
+        const rr = o.r + HERO_RADIUS, od2 = ox * ox + oz * oz;
+        if (od2 >= rr * rr) continue;                                    // pas dans le champignon
+        if (heroVelY <= 0 && prevY >= o.top - 0.06 && hero.position.y <= o.top) {
+          if (heroVelY < -1.5) o.squashV = -7;                          // atterrissage franc → le chapeau s'enfonce
+          hero.position.y = o.top; heroVelY = 0; heroOnGround = true;    // ATTERRIT / se tient dessus
+          hero.position.x += (o.x - hero.position.x) * 0.2;             // recentre sur le chapeau (perso + large)
+          hero.position.z += (o.z - hero.position.z) * 0.2;
+        } else if (hero.position.y < o.top - 0.05) {                     // clippe le CÔTÉ (pas assez haut)
+          const od = Math.sqrt(od2) || 0.0001;
+          if (heroOnGround) {                                            // au sol → simple blocage (il bute)
+            const push = rr - od;
+            hero.position.x += (ox / od) * push; hero.position.z += (oz / od) * push;
+          } else {                                                       // en l'air → TRÉBUCHE, tombe de l'autre côté
+            heroFallT = 1.4; if (fallAction) fallAction.reset();
+            hero.position.y = 0; heroVelY = 0; heroOnGround = true;
+            heroFallVX = Math.sin(hero.rotation.y) * 2.6;
+            heroFallVZ = Math.cos(hero.rotation.y) * 2.6;
+          }
+        }
+      }
+      // BARRIÈRES (AABB) : bloque au sol, on SAUTE par-dessus, on TRÉBUCHE si on la clippe en l'air
+      if (heroFallT <= 0) for (const bar of barriers) {
+        if (hero.position.x <= bar.x0 - HERO_RADIUS || hero.position.x >= bar.x1 + HERO_RADIUS ||
+            hero.position.z <= bar.z0 - HERO_RADIUS || hero.position.z >= bar.z1 + HERO_RADIUS) continue;
+        if (hero.position.y >= bar.top - 0.05) continue;                  // passé au-dessus
+        if (heroOnGround) {                                              // bloqué : repousse (axe le moins pénétré)
+          const pL = hero.position.x - (bar.x0 - HERO_RADIUS), pR = (bar.x1 + HERO_RADIUS) - hero.position.x;
+          const pD = hero.position.z - (bar.z0 - HERO_RADIUS), pU = (bar.z1 + HERO_RADIUS) - hero.position.z;
+          const mp = Math.min(pL, pR, pD, pU);
+          if (mp === pL) hero.position.x = bar.x0 - HERO_RADIUS; else if (mp === pR) hero.position.x = bar.x1 + HERO_RADIUS;
+          else if (mp === pD) hero.position.z = bar.z0 - HERO_RADIUS; else hero.position.z = bar.z1 + HERO_RADIUS;
+        } else {                                                         // en l'air, trop bas → trébuche
+          heroFallT = 1.4; if (fallAction) fallAction.reset();
+          hero.position.y = groundH; heroVelY = 0; heroOnGround = true;
+          heroFallVX = Math.sin(hero.rotation.y) * 2.6;
+          heroFallVZ = Math.cos(hero.rotation.y) * 2.6;
+        }
+      }
+      if (heroFallT > 0) {                                               // pendant la chute : glisse de l'autre côté
+        hero.position.x += heroFallVX * dt; hero.position.z += heroFallVZ * dt;
+        heroFallVX *= 0.94; heroFallVZ *= 0.94;
+        heroFallT = Math.max(0, heroFallT - dt);
+      }
+      // RESSORT des champignons : le chapeau s'enfonce puis rebondit quand on saute dessus
+      for (const o of mushroomObstacles) {
+        if (!o.mesh || (o.squash === 0 && o.squashV === 0)) continue;
+        o.squashV += (-o.squash * 140 - o.squashV * 16) * dt;           // ressort amorti
+        o.squash += o.squashV * dt;
+        if (Math.abs(o.squash) < 0.002 && Math.abs(o.squashV) < 0.02) { // repos → réinitialise
+          o.squash = 0; o.squashV = 0; o.mesh.scale.setScalar(o.base); o.mesh.position.y = o.gk * o.base; continue;
+        }
+        const sq = Math.max(-0.35, Math.min(0.12, o.squash));           // -=compressé
+        const fy = 1 + sq, fxz = 1 - sq * 0.6;
+        o.mesh.scale.set(o.base * fxz, o.base * fy, o.base * fxz);
+        o.mesh.position.y = o.gk * o.base * fy;                         // garde la base au sol
+      }
+      // ANIMATION : Fall (tombé) > Jump (en l'air) > Walking (bouge) > Idle (arrêt) — fondus doux
+      if (heroMixer) {
+        const airborne = !heroOnGround && !heroCar, falling = heroFallT > 0 || heroDeadT > 0;   // sur une voiture = considéré au sol
+        if (airborne && !heroWasAir && jumpAction) jumpAction.reset();   // relance le saut au décollage
+        heroWasAir = airborne;
+        const fT = falling ? 1 : 0;
+        const jT = (!falling && airborne) ? 1 : 0;
+        const wT = (!falling && !airborne && heroMoving) ? 1 : 0;
+        const iT = (!falling && !airborne && !heroMoving) ? 1 : 0;
+        heroFallW += (fT - heroFallW) * Math.min(1, dt * 14);
+        heroJumpW += (jT - heroJumpW) * Math.min(1, dt * 14);
+        heroWalkW += (wT - heroWalkW) * Math.min(1, dt * 10);
+        heroIdleW += (iT - heroIdleW) * Math.min(1, dt * 10);
+        if (fallAction) fallAction.setEffectiveWeight(heroFallW);
+        if (jumpAction) jumpAction.setEffectiveWeight(heroJumpW);
+        if (walkAction) { walkAction.setEffectiveWeight(heroWalkW); walkAction.timeScale = 1.3; }
+        if (idleAction) idleAction.setEffectiveWeight(heroIdleW);
+        heroMixer.update(dt);
+      }
+      heroMesh.scale.setScalar(presenting ? VR_HERO_SCALE : 1);      // perso réduit en VR
+      // caméra TOUJOURS DERRIÈRE le perso : camYaw suit doucement l'orientation du perso
+      { let d = (hero.rotation.y + Math.PI) - camYaw; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; camYaw += d * Math.min(1, dt * 5); }
+      if (presenting) updateFollowRigVR(); else updateFollowCam();   // caméra suit le perso (VR = rig, PC = caméra)
+    }
+    if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe
+    for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
+    // ============================================================
+    //  TRAFIC : voitures foncent vers le joueur (-X). TOIT = plateforme (sauter dessus = OK). Côté/avant = MORT.
+    // ============================================================
+    {
+      updatePeds(dt);                                                            // piétons (marche + traversée)
+      heroCar = null;
+      for (const car of cars) {
+        let nx = car.mesh.position.x - car.speed * dt;                          // avance vers le joueur
+        if (crossBlock.active) {                                                // piéton qui traverse → ligne d'arrêt juste AVANT les bandes
+          const stopLine = crossBlock.x + crossBlock.halfW + car.halfX + 0.4;    // roule jusqu'au ras du passage puis s'arrête
+          if (car.mesh.position.x >= stopLine) nx = Math.max(nx, stopLine);     // (sauf si déjà engagée : elle finit de passer)
+        }
+        car.mesh.position.x = nx;
+        if (car.mesh.position.x < hero.position.x - 14) { respawnCar(car); continue; }   // dépassé → réapparaît devant
+        const dxc = hero.position.x - car.mesh.position.x, dzc = hero.position.z - car.mesh.position.z;
+        if (Math.abs(dxc) < car.halfX + HERO_RADIUS && Math.abs(dzc) < car.halfZ + HERO_RADIUS) {   // dans l'empreinte
+          if (heroDeadT <= 0 && heroVelY <= 0 && heroPrevY >= car.top - 0.18 && hero.position.y <= car.top + 0.05) {
+            hero.position.y = car.top; heroVelY = 0; heroOnGround = true; heroJumps = 0; heroCar = car;   // ATTERRIT sur le TOIT (voiture OU bus)
+          } else if (heroDeadT <= 0 && heroFallT <= 0 && hero.position.y < car.top - 0.18) {
+            heroDeadT = 1.9; if (fallAction) fallAction.reset();                  // PERCUTÉ → MORT
+          }
+        }
+      }
+      // ANTI-EMPILEMENT : jamais deux voitures collées dans la même voie
+      for (const a of cars) for (const b of cars) { if (a !== b && a.lane === b.lane) { const mg = Math.max(a.minGap || 5, b.minGap || 5), gap = a.mesh.position.x - b.mesh.position.x; if (gap > 0 && gap < mg) a.mesh.position.x = b.mesh.position.x + mg; } }
+      if (heroCar) hero.position.x -= heroCar.speed * dt;                         // porté par la voiture (elle glisse sous lui)
+      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-52, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
+      // FUMÉE d'échappement (particules douces qui sortent du pot, montent, s'étalent et s'effacent)
+      smokeT += dt;
+      if (smokeT > 0.02 && cars.length) {
+        smokeT = 0;
+        const c = cars[(Math.random() * cars.length) | 0];
+        for (let k = 0; k < 3; k++) {
+          const p = smoke[smokeIdx]; smokeIdx = (smokeIdx + 1) % smoke.length;
+          p.position.set(c.mesh.position.x + (c.halfX || 1) * 0.9 + (Math.random() - 0.5) * 0.12, (c.groundY || 0) * 0.5 + Math.random() * 0.12, c.mesh.position.z + (Math.random() - 0.5) * 0.3);
+          p.visible = true; p.userData.life = 0.9 + Math.random() * 0.6;
+          p.userData.vx = 0.4 + Math.random() * 0.5; p.userData.vy = 0.45 + Math.random() * 0.5; p.userData.vz = (Math.random() - 0.5) * 0.35;
+          p.scale.setScalar(0.1 + Math.random() * 0.08); p.material.opacity = 0.45 + Math.random() * 0.22;
+        }
+      }
+      for (const p of smoke) {
+        if (!p.visible) continue;
+        p.userData.life -= dt;
+        if (p.userData.life <= 0) { p.visible = false; continue; }
+        p.position.x += p.userData.vx * dt; p.position.y += p.userData.vy * dt; p.position.z += p.userData.vz * dt;
+        p.userData.vy *= 0.985;
+        p.scale.setScalar(p.scale.x + dt * 0.6);            // s'étale
+        p.material.opacity = Math.max(0, p.material.opacity - dt * 0.42);
+      }
+    }
+    // cristaux : rotation + flottement + COLLECTE (par le PERSO)
+    _chest.set(hero.position.x, hero.position.y + 0.5, hero.position.z);   // corps du perso
+    for (const c of crystals) {
+      if (c.userData.done) continue;
+      c.rotation.y += 0.01;
+      if (c.userData.floating && !c.userData.collected)
+        c.position.y = c.userData.baseY + Math.sin(time * 0.002 + c.position.x) * 0.12;
+      if (c.userData.collected) {                        // animation de ramassage (grossit + s'efface)
+        c.userData.pop += dt * 3.2;
+        c.scale.setScalar(c.userData.baseScale * (1 + c.userData.pop));
+        c.traverse(o => { if (o.isMesh && o.material) { o.material.transparent = true; o.material.opacity = Math.max(0, 1 - c.userData.pop); } });
+        if (c.userData.pop >= 1) { c.visible = false; c.userData.done = true; }
+        continue;
+      }
+      if (_chest.distanceTo(c.position) < 1.4) {          // ramassé ! (+1 graine)
+        c.userData.collected = true; ding(); collected++; seeds++;
+        if (collected >= totalCrystals) { updateHUD('Tous les cristaux ! Plante tes graines'); hudFlashUntil = time + 2200; }
+        refreshHUD();
+      }
+    }
+    // pièces d'or : rotation (flip) + flottement + COLLECTE (en sautant) → compteur "Or"
+    for (const c of coins) {
+      if (c.userData.done) continue;
+      c.rotation.y += 0.06;
+      if (!c.userData.collected) c.position.y = c.userData.baseY + Math.sin(time * 0.003 + c.position.x) * 0.1;
+      if (c.userData.collected) {                          // animation de ramassage (grossit + s'efface)
+        c.userData.pop += dt * 3.4;
+        c.scale.setScalar(c.userData.baseScale * (1 + c.userData.pop * 1.4));
+        c.traverse(o => { if (o.isMesh && o.material) { o.material.transparent = true; o.material.opacity = Math.max(0, 1 - c.userData.pop); } });
+        if (c.userData.pop >= 1) { c.visible = false; c.userData.done = true; }
+        continue;
+      }
+      if (_chest.distanceTo(c.position) < 1.2) {           // attrapée en l'air ! (+1 Or)
+        c.userData.collected = true; ding(); goldCoins++;
+        updateHUD('+1 Pièce d\'or !   (Or ' + goldCoins + ')'); hudFlashUntil = time + 1100;
+        refreshHUD();
+      }
+    }
+    // JARDINAGE : croissance des plantes (montée en taille)
+    for (const g of growing) {
+      const gd = g.userData.grow;
+      if (gd.t < 1) {
+        gd.t = Math.min(1, gd.t + dt * 1.8);
+        const k = 1 - Math.pow(1 - gd.t, 3);              // easeOutCubic
+        const s = gd.target * k;
+        g.scale.setScalar(s);
+        g.position.y = gd.offset * s;
+      }
+    }
+
+    if (BUBBLE_ON) {
+    // MICRO : mesure le niveau + détecte le souffle
+    if (micReady && analyser) {
+      analyser.getByteFrequencyData(micData);
+      let sum = 0; const n = Math.min(48, micData.length);
+      for (let i = 2; i < n; i++) sum += micData[i];
+      micLevel = sum / ((n - 2) * 255);
+      micBlow = micLevel > MIC_THRESHOLD;
+      micFill.style.width = Math.min(100, micLevel * 180) + '%';
+    }
+    // BULLE : souffle + dérive + ÉCLATE au sol/objet + transport par le portail
+    const blowing = vrTrigger || mobileBlow || pcBlow || micBlow;
+    blowCone.visible = blowing && bubbleWarpT < 0 && bubblePopT < 0;
+    if (bubblePopT >= 0) {                                // === ÉCLATEMENT ===
+      bubblePopT += dt;
+      const k = Math.min(1, bubblePopT / 0.22);
+      bubble.scale.setScalar(1 + k * 0.9);               // gonfle
+      bubble.material.opacity = 0.5 * (1 - k);           // s'efface
+      if (k >= 1) bubble.visible = false;
+      for (const d of drops) {                            // gouttelettes qui retombent
+        if (!d.visible) continue;
+        d.userData.vel.y -= 9 * dt;
+        d.position.addScaledVector(d.userData.vel, dt);
+        d.material.opacity = Math.max(0, 0.7 - bubblePopT);
+        if (d.position.y < 0.05 || bubblePopT > 0.9) d.visible = false;
+      }
+      if (bubblePopT > 1.1) {                             // réapparition
+        bubblePopT = -1;
+        bubble.visible = true; bubble.material.opacity = 0.5; bubble.scale.setScalar(1);
+        bubble.position.copy(BUBBLE_START); bubbleVel.set(0, 0, 0);
+      }
+    } else if (bubbleWarpT >= 0) {                        // === ASPIRATION portail ===
+      bubbleWarpT += dt * 2.4;
+      bubble.position.lerp(PORTAL_POS, 0.25);
+      bubble.scale.setScalar(Math.max(0.05, 1 - bubbleWarpT));
+      if (bubbleWarpT >= 1) {
+        bubbleWarpT = -1; portalsDone++;
+        chime(); updateHUD('Bulle transportée !   (' + portalsDone + ')'); hudFlashUntil = time + 2400;
+        movePortal();
+        bubble.position.copy(BUBBLE_START); bubbleVel.set(0, 0, 0); bubble.scale.setScalar(1);
+      }
+    } else {                                              // === PILOTAGE : la bulle reste à hauteur, on l'ORIENTE ===
+      if (blowing) {
+        camera.getWorldPosition(_head); camera.getWorldDirection(_look);
+        _look.y = 0;                                       // souffle HORIZONTAL uniquement
+        _toB.copy(bubble.position).sub(_head); _toB.y = 0;
+        const dist = _toB.length();
+        if (dist < 6.5 && dist > 0.05 && _look.lengthSq() > 0.01) {
+          _look.normalize(); _toB.normalize();
+          if (_toB.dot(_look) > 0.25) bubbleVel.addScaledVector(_look, 11 * dt);   // pousse vers où tu regardes
+        }
+      }
+      bubbleVel.y = 0;                                    // PAS de gravité : la bulle ne tombe JAMAIS
+      bubbleVel.multiplyScalar(0.94);                     // traînée (s'arrête doucement quand tu ne souffles plus)
+      bubble.position.addScaledVector(bubbleVel, dt);
+      bubble.position.y = HOVER_Y;                        // verrouillée à hauteur des yeux
+      // GONDOLEMENT façon bulle de savon : les axes ondulent (déphasés) → elle se déforme du petit au grand
+      const w = 0.10;
+      bubble.scale.set(
+        1 + Math.sin(time * 0.0031) * w,
+        1 + Math.sin(time * 0.0023 + 1.7) * w,
+        1 + Math.sin(time * 0.0027 + 3.1) * w
+      );
+      bubble.material.iridescenceIOR = 1.3 + Math.sin(time * 0.001) * 0.45;   // scintillement irisé animé
+      trailT += dt;
+      if (trailT > 0.045 && bubbleVel.lengthSq() > 0.4) {                     // dépose une trace si elle bouge
+        trailT = 0;
+        const tm = trail[trailIdx]; trailIdx = (trailIdx + 1) % trail.length;
+        tm.position.copy(bubble.position); tm.visible = true; tm.material.opacity = 0.32; tm.scale.setScalar(0.9);
+      }
+      const bpr = Math.hypot(bubble.position.x, bubble.position.z);
+      if (bpr > GARDEN_R - 1) { bubble.position.x *= (GARDEN_R - 1) / bpr; bubble.position.z *= (GARDEN_R - 1) / bpr; bubbleVel.multiplyScalar(0.4); }
+      for (const o of obstacles) { if (bubble.position.distanceToSquared(o.pos) < (o.r + 0.28) * (o.r + 0.28)) { popBubble(); break; } } // touche un OBJET → éclate
+      if (bubblePopT < 0 && bubble.position.distanceTo(PORTAL_POS) < 1.0) bubbleWarpT = 0;  // entre dans le portail
+    }
+    portal.rotation.z += dt * 0.6;
+    portal.scale.setScalar(1 + Math.sin(time * 0.004) * 0.05);
+    // traînée de la bulle : fondu
+    for (const tm of trail) { if (!tm.visible) continue; tm.material.opacity -= dt * 0.7; tm.scale.multiplyScalar(1 - dt * 0.4); if (tm.material.opacity <= 0) tm.visible = false; }
+    }
+    if (hudFlashUntil && time > hudFlashUntil) { hudFlashUntil = 0; updateHUD(hudBase); }
+    // papillons : vol + battement d'ailes
+    const bt = time * 0.001;
+    for (const bf of butterflies) {
+      const u = bf.userData;
+      const nx = u.cx + Math.cos(bt * u.sp + u.ph) * u.r;
+      const nz = u.cz + Math.sin(bt * u.sp * 1.1 + u.ph) * u.r;
+      bf.position.set(nx, u.baseY + Math.sin(bt * 2 + u.ph) * 0.4, nz);
+      bf.rotation.y = Math.atan2(nx - u.px, nz - u.pz);
+      u.px = nx; u.pz = nz;
+      const flap = Math.sin(time * 0.02 + u.ph) * 0.9;
+      u.lw.rotation.z = flap; u.rw.rotation.z = -flap;
+    }
+    // champignons : dandinement cartoon (ressort + balancement), désynchronisés
+    for (const m of mushrooms) {
+      if (m.userData.grow && m.userData.grow.t < 1) continue;   // pendant la pousse : pas de wobble
+      const mu = m.userData.mush, s = Math.sin(bt * 2 + mu.ph);
+      m.scale.set(mu.base * (1 + 0.05 * s), mu.base * (1 - 0.06 * s), mu.base * (1 + 0.05 * s)); // squash & stretch
+      m.rotation.z = 0.05 * Math.sin(bt * 1.3 + mu.ph);         // léger balancement
+    }
+
+    if (GAME_ENABLED) tex.needsUpdate = true;
+    renderer.render(scene, camera);
+  });
+</script>
+</body>
+</html>
