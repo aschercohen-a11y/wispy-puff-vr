@@ -12,8 +12,8 @@
 **Où on en est (dernière session) :**
 - ✅ Jeu complet et jouable : vol fantôme 6DOF, cristaux, bulle au souffle (micro), jardinage, portail téléporteur, papillons, herbe animée, 2 maisons, champignons amanites qui dandinent.
 - ✅ **Nouvel outil photo→3D : Meshy.ai** — bien supérieur à TripoSR (net, PBR, pas « fondu »). Compte utilisateur `aschercohen`, ~120 crédits. Peut aussi **rigger + animer** des perso humanoïdes (marche, course…) → GLB animé lisible par three.js (`AnimationMixer`).
-- ✅ **Maison-carotte Meshy** (`models/carrot_meshy.glb`) plantée à `(x=7, z=6)`, échelle **3.2**, `rotation.y = Math.PI`. Remplace l'ancienne carotte TripoSR (`carrot_ai.glb`, obsolète). Superbe : feuillage net, cheminée brique, boîte aux lettres, fenêtres à carreaux, fleurs.
-- 🟡 **À vérifier dans le casque** : taille OK ? porte bien orientée vers le centre ? → ajuster `s` et `rotation.y` dans `index.html` (loader `carrot_meshy.glb`).
+- ✅ **Maison-carotte Meshy** (`models/carrot_meshy.glb`) plantée à `(x=7, z=6)`, échelle **3.2**, `rotation.y = Math.PI`. Remplace l'ancienne carotte TripoSR (`carrot_ai.glb`, obsolète). **Validée en VR dans le casque = parfaite** ✅ (feuillage net, cheminée brique, boîte aux lettres, fenêtres à carreaux, fleurs).
+- ✅ **Contrôles PC/navigateur refaits** : OrbitControls remplacé par un **vol libre** (joystick souris bas-gauche + WASD/flèches, regard en glissant la souris, ⬆/⬇ ou Espace/Maj pour monter/descendre, F souffler, G planter). Le WebGL PC de l'utilisateur **remarche** (avant il était cassé, GPU AMD).
 - ⚠️ **LEÇON MESHY** : l'export brut fait **49 Mo / 1,4 M triangles** = injouable sur Quest. **Toujours optimiser** avant d'intégrer (voir §Pouvoir clé) → on descend à ~1 Mo / 12 k tris.
 
 **Comment reprendre :**
