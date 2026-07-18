@@ -179,6 +179,7 @@
   const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
   const HERO_RADIUS = 0.28;                   // rayon de collision du perso
   let heroFallT = 0, heroFallVX = 0, heroFallVZ = 0;   // chute : timer + élan « de l'autre côté »
+  const walkPlatforms = [];                   // {x0,x1,z0,z1,h} : surfaces surélevées marchables (trottoirs)
   function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
 
   // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
@@ -640,6 +641,36 @@
     }
   });
 
+  // ============================================================
+  //  ROUTE stylisée : chaussée bitume + ligne pointillée + 2 trottoirs surélevés (marchables)
+  // ============================================================
+  {
+    const ROAD_LEN = 28, ROAD_W = 3, SIDE_W = 0.7, SIDE_H = 0.13, ROAD_Z = 0;   // route le long de l'axe X, centrée en z=0
+    function makeAsphaltTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+      x.fillStyle = '#565a63'; x.fillRect(0, 0, 128, 128);                        // bitume gris-bleu doux
+      for (let i = 0; i < 500; i++) { const g = 70 + (Math.random() * 40 | 0); x.fillStyle = 'rgba(' + g + ',' + (g + 4) + ',' + (g + 12) + ',0.5)'; x.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
+      x.fillStyle = '#f2e7c4'; x.fillRect(26, 58, 76, 12);                         // dash central (répété = pointillés)
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD_LEN / 4, 1); return t;
+    }
+    function makeSideTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+      x.fillStyle = '#c3bcaa'; x.fillRect(0, 0, 128, 128);                         // dalles béton clair
+      x.strokeStyle = 'rgba(120,114,102,0.6)'; x.lineWidth = 4;
+      for (let i = 0; i <= 128; i += 32) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); }
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD_LEN / 1.5, 1); return t;
+    }
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_LEN, ROAD_W), new THREE.MeshStandardMaterial({ map: makeAsphaltTex(), roughness: 1, metalness: 0 }));
+    road.rotation.x = -Math.PI / 2; road.position.set(0, 0.012, ROAD_Z); scene.add(road);   // juste au-dessus de l'herbe
+    const sideTex = makeSideTex();
+    for (const sgn of [-1, 1]) {
+      const zc = ROAD_Z + sgn * (ROAD_W / 2 + SIDE_W / 2);
+      const s = new THREE.Mesh(new THREE.BoxGeometry(ROAD_LEN, SIDE_H, SIDE_W), new THREE.MeshStandardMaterial({ map: sideTex, roughness: 1, metalness: 0 }));
+      s.position.set(0, SIDE_H / 2, zc); scene.add(s);
+      walkPlatforms.push({ x0: -ROAD_LEN / 2, x1: ROAD_LEN / 2, z0: zc - SIDE_W / 2, z1: zc + SIDE_W / 2, h: SIDE_H });   // trottoir = plateforme montable
+    }
+  }
+
   // helper : poser un modèle importé avec sa base sur l'herbe (y=0)
   function groundOffset(obj) { return -new THREE.Box3().setFromObject(obj).min.y; }
 
@@ -1042,7 +1073,9 @@
       heroVelY -= HERO_GRAVITY * dt;
       hero.position.y += heroVelY * dt;
       heroOnGround = false;
-      if (hero.position.y <= 0) { hero.position.y = 0; heroVelY = 0; heroOnGround = true; }
+      let groundH = 0;                                                 // hauteur du sol (0, ou trottoir surélevé)
+      for (const pf of walkPlatforms) if (hero.position.x >= pf.x0 && hero.position.x <= pf.x1 && hero.position.z >= pf.z0 && hero.position.z <= pf.z1) groundH = Math.max(groundH, pf.h);
+      if (hero.position.y <= groundH) { hero.position.y = groundH; heroVelY = 0; heroOnGround = true; }
       const hpr = Math.hypot(hero.position.x, hero.position.z);
       if (hpr > HERO_CLAMP) { hero.position.x *= HERO_CLAMP / hpr; hero.position.z *= HERO_CLAMP / hpr; }
       // CHAMPIGNONS = obstacles-plateformes : on peut MONTER dessus, on ne peut pas les TRAVERSER ;
