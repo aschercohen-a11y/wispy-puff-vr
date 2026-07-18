@@ -183,6 +183,10 @@ Oculus/
 - 🧹 **Exclusion route** : `onRoad()` filtre l'herbe (retry de position, sinon scale 0) ET les spots de champignons (déplacés hors route). Rien ne pousse sur la chaussée.
 - 🚧 **Barrières à sauter** (`models/barrier.glb` Meshy 8Mo→97Ko, `barriers[]`) : 4 haies rouge/blanc en travers de la route (`x=-9,-3,3,9`), scale (1.6,0.5,1.6) + rotY π/2. Collision AABB : bloque au sol / saute par-dessus (`top≈0.45`) / trébuche si clippé en l'air (même logique chute que champignons). Source `barrier_src.glb` (gitignore).
 
+- 🛠️ **ÉDITEUR de placement** (`EDIT`, `EDIT_TYPES`, `assetBase`) : touche **E** ou bouton 🛠️ (PC souris). Palette (Maison1/2, Boulangerie, Moulin, carotte, chaumière, champignon, arbre, barrière). Clic sol=poser · glisser=déplacer · clic-droit=orbite caméra · molette=zoom · R=tourner · +/−=taille · Suppr=effacer. Caméra éditeur = orbite top-down (`updateEditorCam`), jeu gelé. **Sync PC↔casque via Supabase** : table DÉDIÉE `wispy_layout` (1 ligne id=1, jsonb `data`), clés fraîches dans `Appshootnbox.md` (les globales CLAUDE.md étaient périmées). `editSave` → PATCH Supabase + localStorage ; au boot → GET Supabase (sinon localStorage) → `editApplyLayout` (retry tant que les modèles chargent). **Ne PAS toucher aux tables de l'app** (table séparée). SQL de création : voir historique (create table + RLS anon read/write + notify pgrst).
+- 🏡 **4 maisons Meshy** dans la palette : `house1/house2/house_bakery/windmill.glb` (2048, boulangerie décimée Blender 1.5M→46k tris via `dev/decimate.py`). Chargées comme BASE seulement (pas placées par défaut).
+- ➖ **Retirés/désactivés** : arbres par défaut (dispo palette), **bulle/portail/micro** (`BUBBLE_ON=false`, code gardé). Trottoirs élargis (`ROAD.sideW=1.3`).
+
 **En cours (à finir) :**
 - 🟡 **Carotte Meshy** plantée (`carrot_meshy.glb`, pos (7,6), scale 3.2, rotY π) — vérifier dans le casque : **taille / orientation porte**. Ajuster `s` et `rotation.y` dans `index.html`.
 
