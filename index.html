@@ -731,10 +731,13 @@
     setTrafficScale(EDIT_TYPES.car.s);                   // taille initiale
     for (let i = 0; i < cars.length; i++) respawnCar(cars[i], hero.position.x + 12 + i * 16);
   });
-  // Fumée d'échappement (pool de petites sphères grises)
+  // Fumée d'échappement = PARTICULES douces (billboards avec dégradé radial)
   const smoke = [];
-  { const sg = new THREE.SphereGeometry(1, 8, 6);
-    for (let i = 0; i < 26; i++) { const s = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ color: 0xc2c7cb, transparent: true, opacity: 0, depthWrite: false })); s.visible = false; s.userData = { life: 0, vy: 0 }; scene.add(s); smoke.push(s); } }
+  { const sc = document.createElement('canvas'); sc.width = sc.height = 64; const sx = sc.getContext('2d');
+    const gr = sx.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(225,227,230,0.95)'); gr.addColorStop(0.45, 'rgba(205,208,213,0.4)'); gr.addColorStop(1, 'rgba(205,208,213,0)');
+    sx.fillStyle = gr; sx.fillRect(0, 0, 64, 64);
+    const smokeTex = new THREE.CanvasTexture(sc);
+    for (let i = 0; i < 70; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0, depthWrite: false, color: 0xd0d4d8 })); s.visible = false; s.userData = { life: 0, vx: 0, vy: 0, vz: 0 }; scene.add(s); smoke.push(s); } }
   let smokeIdx = 0, smokeT = 0;
 
   // --- Arbres low-poly (Poly Pizza) plantés ---
@@ -1280,6 +1283,8 @@
   renderer.setAnimationLoop((time) => {
     const dt = prevFrameT ? Math.min(0.05, (time - prevFrameT) / 1000) : 0.016; prevFrameT = time;
     for (const rec of EDIT.placed) if (rec.blades) rec.blades.rotation.z += dt * 1.2;   // pales des moulins tournent
+    // la taille du trafic suit la voiture d'éditeur (sélectionnée en priorité) — même en mode éditeur
+    { const refCar = (EDIT.sel && EDIT.sel.type === 'car') ? EDIT.sel : EDIT.placed.find(r => r.type === 'car'); if (refCar && carBaseBox && Math.abs(refCar.scale - trafficScale) > 0.001) setTrafficScale(refCar.scale); }
     if (EDIT.on && !presenting) {                     // MODE ÉDITEUR : jeu gelé, caméra libre
       updateEditorCam(dt);
       if (grassWind) grassWind.value = time * 0.001;
@@ -1411,9 +1416,6 @@
     //  TRAFIC : voitures foncent vers le joueur (-X). TOIT = plateforme (sauter dessus = OK). Côté/avant = MORT.
     // ============================================================
     {
-      // la taille des voitures du trafic suit la voiture posée dans l'éditeur (tu la règles avec ▲▼)
-      const refCar = EDIT.placed.find(r => r.type === 'car');
-      if (refCar && Math.abs(refCar.scale - trafficScale) > 0.001) setTrafficScale(refCar.scale);
       heroCar = null;
       for (const car of cars) {
         car.mesh.position.x -= car.speed * dt;                                   // avance vers le joueur
@@ -1431,10 +1433,28 @@
       for (const a of cars) for (const b of cars) { if (a !== b && a.lane === b.lane) { const gap = a.mesh.position.x - b.mesh.position.x; if (gap > 0 && gap < carMinGap) a.mesh.position.x = b.mesh.position.x + carMinGap; } }
       if (heroCar) hero.position.x -= heroCar.speed * dt;                         // porté par la voiture (elle glisse sous lui)
       if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-11, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
-      // FUMÉE d'échappement
+      // FUMÉE d'échappement (particules douces qui sortent du pot, montent, s'étalent et s'effacent)
       smokeT += dt;
-      if (smokeT > 0.09 && cars.length) { smokeT = 0; const c = cars[(Math.random() * cars.length) | 0]; const p = smoke[smokeIdx]; smokeIdx = (smokeIdx + 1) % smoke.length; p.position.set(c.mesh.position.x + carHalfX * 0.9, carGroundY * 0.6, c.mesh.position.z + (Math.random() - 0.5) * 0.2); p.visible = true; p.userData.life = 1; p.userData.vy = 0.3 + Math.random() * 0.3; p.scale.setScalar(0.1); p.material.opacity = 0.5; }
-      for (const p of smoke) { if (!p.visible) continue; p.userData.life -= dt * 1.3; if (p.userData.life <= 0) { p.visible = false; continue; } p.position.x += dt * 0.6; p.position.y += p.userData.vy * dt; p.scale.setScalar(0.1 + (1 - p.userData.life) * 0.4); p.material.opacity = 0.45 * p.userData.life; }
+      if (smokeT > 0.035 && cars.length) {
+        smokeT = 0;
+        const c = cars[(Math.random() * cars.length) | 0];
+        for (let k = 0; k < 2; k++) {
+          const p = smoke[smokeIdx]; smokeIdx = (smokeIdx + 1) % smoke.length;
+          p.position.set(c.mesh.position.x + carHalfX * 0.85 + (Math.random() - 0.5) * 0.1, carGroundY * 0.45 + Math.random() * 0.08, c.mesh.position.z + (Math.random() - 0.5) * 0.22);
+          p.visible = true; p.userData.life = 0.7 + Math.random() * 0.5;
+          p.userData.vx = 0.4 + Math.random() * 0.4; p.userData.vy = 0.35 + Math.random() * 0.4; p.userData.vz = (Math.random() - 0.5) * 0.3;
+          p.scale.setScalar(0.05 + Math.random() * 0.05); p.material.opacity = 0.3 + Math.random() * 0.18;
+        }
+      }
+      for (const p of smoke) {
+        if (!p.visible) continue;
+        p.userData.life -= dt;
+        if (p.userData.life <= 0) { p.visible = false; continue; }
+        p.position.x += p.userData.vx * dt; p.position.y += p.userData.vy * dt; p.position.z += p.userData.vz * dt;
+        p.userData.vy *= 0.985;
+        p.scale.setScalar(p.scale.x + dt * 0.45);           // s'étale doucement
+        p.material.opacity = Math.max(0, p.material.opacity - dt * 0.55);
+      }
     }
     // cristaux : rotation + flottement + COLLECTE (par le PERSO)
     _chest.set(hero.position.x, hero.position.y + 0.5, hero.position.z);   // corps du perso
