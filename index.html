@@ -150,7 +150,7 @@
   const hero = new THREE.Group();
   const heroMesh = new THREE.Group();      // partie visuelle séparée de la physique
   hero.add(heroMesh);
-  hero.position.set(-11, 0, 0);              // départ au bout de la route
+  hero.position.set(-26, 0, 0);              // départ au TOUT DÉBUT de la route (bout -X)
   hero.rotation.y = Math.PI / 2;             // face à la route (le long de +X)
   scene.add(hero);
 
@@ -682,7 +682,7 @@
     });
     const S = 0.34, lanes = [-1.5, 0, 1.5], spots = [];
     let li = 0;
-    for (let x = -6; x <= 26; x += 3.2) {                     // arcs de 3 pièces (monte→descend), loin du spawn
+    for (let x = -20; x <= 26; x += 3.2) {                    // arcs de 3 pièces (monte→descend) le long du parcours
       const z = lanes[li % 3]; li++;
       spots.push({ x: x - 0.95, z: z, y: 1.6 });
       spots.push({ x: x,        z: z, y: 2.1 });
@@ -1778,7 +1778,7 @@
       // ANTI-EMPILEMENT : jamais deux voitures collées dans la même voie
       for (const a of cars) for (const b of cars) { if (a !== b && a.lane === b.lane) { const gap = a.mesh.position.x - b.mesh.position.x; if (gap > 0 && gap < carMinGap) a.mesh.position.x = b.mesh.position.x + carMinGap; } }
       if (heroCar) hero.position.x -= heroCar.speed * dt;                         // porté par la voiture (elle glisse sous lui)
-      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-11, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
+      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-26, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
       // FUMÉE d'échappement (particules douces qui sortent du pot, montent, s'étalent et s'effacent)
       smokeT += dt;
       if (smokeT > 0.02 && cars.length) {
