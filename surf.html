@@ -684,13 +684,13 @@
     base.traverse(function (o) {
       if (o.isMesh && o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) { mt.metalness = 0.25; mt.roughness = 0.35; mt.emissive = new THREE.Color(0x4a3200); mt.emissiveIntensity = 0.35; mt.side = THREE.DoubleSide; } }); }
     });
-    const S = 0.34, lanes = [-1.5, 0, 1.5], spots = [];
-    let li = 0;
-    for (let x = -50; x <= 52; x += 3.4) {                    // arcs de 3 pièces (monte→descend) sur tout le parcours allongé
-      const z = lanes[li % 3]; li++;
-      spots.push({ x: x - 0.95, z: z, y: 1.6 });
-      spots.push({ x: x,        z: z, y: 2.1 });
-      spots.push({ x: x + 0.95, z: z, y: 1.6 });
+    const S = 0.34, lanes = [-2, 0, 2], spots = [];         // 3 voies du runner
+    let li = 0, seg = 0;
+    for (let x = -50; x <= 52; x += 2.0) {
+      const z = lanes[li % 3], phase = seg % 10;
+      const y = phase < 6 ? 0.5 : 0.5 + Math.sin((phase - 6) / 3 * Math.PI) * 1.4;   // 6 pièces AU SOL puis 4 en ARC (saut)
+      spots.push({ x: x, z: z, y: y });
+      seg++; if (phase === 9) li++;                          // change de voie à chaque cycle
     }
     for (let i = 0; i < spots.length; i++) {
       const c = base.clone(true);
@@ -741,9 +741,9 @@
       const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
       x.fillStyle = '#565a63'; x.fillRect(0, 0, 128, 128);                        // bitume gris-bleu doux
       for (let i = 0; i < 500; i++) { const g = 70 + (Math.random() * 40 | 0); x.fillStyle = 'rgba(' + g + ',' + (g + 4) + ',' + (g + 12) + ',0.5)'; x.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
-      // ROUTE À 2 VOIES : lignes de bord blanches continues + ligne centrale pointillée
+      // ROUTE À 3 VOIES : lignes de bord blanches continues + 2 lignes pointillées (séparent les 3 voies)
       x.fillStyle = '#e9e4d2'; x.fillRect(0, 9, 128, 5); x.fillRect(0, 114, 128, 5);   // lignes de bord (le long de la route)
-      x.fillStyle = '#f2e7c4'; x.fillRect(24, 60, 80, 7);                          // ligne centrale pointillée (sépare les 2 voies)
+      x.fillStyle = '#f2e7c4'; x.fillRect(24, 40, 80, 6); x.fillRect(24, 83, 80, 6);   // 2 lignes pointillées (z=-1 et z=+1)
       const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 4, 1); return t;
     }
     function makeSideTex() {
