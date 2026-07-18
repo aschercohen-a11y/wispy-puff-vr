@@ -55,7 +55,7 @@
   <div id="victory" class="overlay hidden"><button id="btn-replay">replay</button></div>
 </div>
 
-<div id="info">👻 Wispy Puff VR — pointe la manette sur le gros bouton <b>ENTER VR</b> ci-dessous et clique pour <b>entrer dans le jardin et voler</b>. (PC : souris · Mobile : joystick)</div>
+<div id="info">👻 Wispy Puff VR — <b>PC :</b> joystick (bas-gauche) ou <b>WASD</b> pour voler · <b>glisser la souris</b> = regarder · <b>⬆/⬇</b> ou Espace/Maj = monter/descendre · <b>F</b> souffler · <b>G</b> planter. <b>Mobile :</b> joystick. <b>Casque :</b> bouton ENTER VR.</div>
 
 <!-- 2) Le jeu, inchangé (il pilote sa propre boucle via requestAnimationFrame) -->
 <script src="game.js"></script>
@@ -126,8 +126,31 @@
 
   // Souffle (bulle) : sources d'entrée (VR gâchette / mobile bouton / PC touche F)
   let vrTrigger = false, mobileBlow = false, pcBlow = false;
-  addEventListener('keydown', (e) => { if (e.code === 'KeyF') pcBlow = true; });
-  addEventListener('keyup', (e) => { if (e.code === 'KeyF') pcBlow = false; });
+  // État clavier PC : WASD/flèches = voler, Espace/Maj = monter/descendre, F = souffler, G = planter
+  let kW = false, kA = false, kS = false, kD = false;
+  addEventListener('keydown', (e) => {
+    switch (e.code) {
+      case 'KeyF': pcBlow = true; break;
+      case 'KeyG': plant(); break;
+      case 'KeyW': case 'ArrowUp': kW = true; break;
+      case 'KeyS': case 'ArrowDown': kS = true; break;
+      case 'KeyA': case 'ArrowLeft': kA = true; break;
+      case 'KeyD': case 'ArrowRight': kD = true; break;
+      case 'Space': mobileUp = true; e.preventDefault(); break;
+      case 'ShiftLeft': case 'ShiftRight': mobileDown = true; break;
+    }
+  });
+  addEventListener('keyup', (e) => {
+    switch (e.code) {
+      case 'KeyF': pcBlow = false; break;
+      case 'KeyW': case 'ArrowUp': kW = false; break;
+      case 'KeyS': case 'ArrowDown': kS = false; break;
+      case 'KeyA': case 'ArrowLeft': kA = false; break;
+      case 'KeyD': case 'ArrowRight': kD = false; break;
+      case 'Space': mobileUp = false; break;
+      case 'ShiftLeft': case 'ShiftRight': mobileDown = false; break;
+    }
+  });
 
   // Détection tactile (téléphone/tablette)
   const MOBILE = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
@@ -137,13 +160,58 @@
   let joyX = 0, joyY = 0, mYaw = 0, mPitch = 0, lookId = null, lastLX = 0, lastLY = 0;
 
   if (!MOBILE) {
-    // PC : caméra SOURIS (clic-glisser = tourner, molette = zoom)
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1.0, -2);
-    controls.enableDamping = true;
-    controls.maxPolarAngle = Math.PI * 0.49;
-    controls.minDistance = 0.5; controls.maxDistance = 22;
-    controls.update();
+    // PC : VOL LIBRE — regard en glissant la souris, JOYSTICK souris (+ WASD) pour voler, ⬆/⬇ (ou Espace/Maj)
+    const dom = renderer.domElement;
+    dom.style.touchAction = 'none';
+    dom.addEventListener('contextmenu', (e) => e.preventDefault());   // pas de menu clic droit
+
+    // --- Regard : glisser-souris sur la scène (comme sur mobile) ---
+    let dragLook = false;
+    dom.addEventListener('pointerdown', (e) => {
+      dragLook = true; lastLX = e.clientX; lastLY = e.clientY;
+      try { dom.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    dom.addEventListener('pointermove', (e) => {
+      if (!dragLook) return;
+      mYaw   -= (e.clientX - lastLX) * 0.004;
+      mPitch -= (e.clientY - lastLY) * 0.004;
+      lastLX = e.clientX; lastLY = e.clientY;
+      mPitch = Math.max(-1.2, Math.min(1.2, mPitch));
+      player.rotation.y = mYaw; camera.rotation.x = mPitch;
+    });
+    const endLook = () => { dragLook = false; };
+    dom.addEventListener('pointerup', endLook);
+    dom.addEventListener('pointercancel', endLook);
+
+    // --- Joystick SOURIS (voler) en bas à gauche ---
+    const base = document.createElement('div');
+    base.style.cssText = 'position:fixed;left:24px;bottom:70px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.4);z-index:30;touch-action:none;cursor:grab;';
+    const knob = document.createElement('div');
+    knob.style.cssText = 'position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.6);pointer-events:none;';
+    base.appendChild(knob); document.body.appendChild(base);
+    const R = 45; let jactive = false;
+    function setKnob(dx, dy) {
+      const d = Math.hypot(dx, dy); if (d > R) { dx = dx / d * R; dy = dy / d * R; }
+      knob.style.left = (35 + dx) + 'px'; knob.style.top = (35 + dy) + 'px';
+      joyX = dx / R; joyY = dy / R;
+    }
+    function joyFrom(e) { const r = base.getBoundingClientRect(); setKnob(e.clientX - r.left - 60, e.clientY - r.top - 60); }
+    base.addEventListener('pointerdown', (e) => { jactive = true; try { base.setPointerCapture(e.pointerId); } catch (_) {} joyFrom(e); e.preventDefault(); });
+    base.addEventListener('pointermove', (e) => { if (jactive) joyFrom(e); });
+    const endJoy = () => { jactive = false; joyX = 0; joyY = 0; knob.style.left = '35px'; knob.style.top = '35px'; };
+    base.addEventListener('pointerup', endJoy); base.addEventListener('pointercancel', endJoy);
+
+    // --- Boutons MONTER (⬆) / DESCENDRE (⬇) à la souris ---
+    function flyBtn(label, bottom, onHold) {
+      const el = document.createElement('div'); el.textContent = label;
+      el.style.cssText = 'position:fixed;right:24px;bottom:' + bottom + 'px;width:72px;height:72px;border-radius:50%;background:rgba(120,200,255,.30);border:2px solid rgba(255,255,255,.55);z-index:30;display:flex;align-items:center;justify-content:center;font-size:34px;color:#fff;user-select:none;cursor:pointer;';
+      el.addEventListener('pointerdown', (e) => { onHold(true); try { el.setPointerCapture(e.pointerId); } catch (_) {} e.preventDefault(); });
+      el.addEventListener('pointerup', () => onHold(false));
+      el.addEventListener('pointercancel', () => onHold(false));
+      document.body.appendChild(el);
+    }
+    flyBtn('⬆', 168, (v) => { mobileUp = v; });
+    flyBtn('⬇', 80, (v) => { mobileDown = v; });
   } else {
     // TÉLÉPHONE : joystick (marcher) + glisser (regarder)
     const base = document.createElement('div');
@@ -854,24 +922,26 @@
     if (presenting) {
       updateVR(time);
       if (GAME_ENABLED && typeof window.loop === 'function') window.loop(time);
-    } else if (MOBILE) {
-      // TÉLÉPHONE : vol vers le regard (joystick) — ⬆/⬇ pour monter/descendre
-      if (Math.hypot(joyX, joyY) > 0.05) {
+    } else {
+      // MOBILE + PC : vol libre vers le regard — joystick (souris/tactile) + WASD/flèches (PC)
+      let mx = joyX, my = joyY;
+      if (kW) my -= 1; if (kS) my += 1; if (kA) mx -= 1; if (kD) mx += 1;   // clavier PC
+      const mag = Math.hypot(mx, my);
+      if (mag > 0.05) {
+        if (mag > 1) { mx /= mag; my /= mag; }                     // diagonale pas plus rapide
         camera.getWorldDirection(_fwd); _fwd.normalize();          // regard complet (haut/bas inclus)
         _rightv.set(_fwd.x, 0, _fwd.z);
         if (_rightv.lengthSq() < 1e-4) _rightv.set(0, 0, -1);
         _rightv.normalize(); _rightv.crossVectors(_rightv, _up).normalize();
         const SPD = 2.4 * dt;
-        player.position.addScaledVector(_fwd, -joyY * SPD);
-        player.position.addScaledVector(_rightv, joyX * SPD);
+        player.position.addScaledVector(_fwd, -my * SPD);          // avant = vole vers où tu regardes
+        player.position.addScaledVector(_rightv, mx * SPD);        // strafe latéral
         const pr = Math.hypot(player.position.x, player.position.z);
         if (pr > 45) { player.position.x *= 45 / pr; player.position.z *= 45 / pr; }
       }
-    } else if (controls) {
-      controls.update();   // preview PC : caméra souris
     }
-    // FANTÔME : mobile monte/descend (boutons) + reste dans un volume raisonnable (aucune gravité)
-    if (!presenting && MOBILE) { if (mobileUp) player.position.y += 2.6 * dt; if (mobileDown) player.position.y -= 2.6 * dt; }
+    // FANTÔME : monte/descend (boutons ⬆/⬇ ou Espace/Maj) + reste dans un volume raisonnable (aucune gravité)
+    if (!presenting) { if (mobileUp) player.position.y += 2.6 * dt; if (mobileDown) player.position.y -= 2.6 * dt; }
     player.position.y = Math.max(0.4, Math.min(40, player.position.y));
     if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
