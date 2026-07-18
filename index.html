@@ -223,6 +223,9 @@
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.xr.enabled = true;
   renderer.xr.setReferenceSpaceType('local-floor');
+  // Rendu VR NET : supersampling du framebuffer + pas de rendu fovéal (bords nets)
+  try { renderer.xr.setFramebufferScaleFactor(1.5); } catch (e) {}   // 1.0 = natif ; 1.5 = plus net (baisser si ça rame)
+  try { renderer.xr.setFoveation(0); } catch (e) {}                  // 0 = aucune dégradation périphérique
   document.body.appendChild(renderer.domElement);
   const vrBtn = VRButton.createButton(renderer);
   document.body.appendChild(vrBtn);
