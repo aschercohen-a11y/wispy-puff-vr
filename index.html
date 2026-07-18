@@ -449,7 +449,7 @@
   scene.add(ground);
 
   // --- VRAIE HERBE : milliers de brins DEBOUT (InstancedMesh) + léger vent ---
-  let grassWind = null;
+  let grassWind = null, grassMesh = null, grassOrig = null, grassXZ = null;
   {
     const H = 0.32, W = 0.04, SEG = 4;
     const bg = new THREE.PlaneGeometry(W, H, 1, SEG);
@@ -478,17 +478,19 @@
     const COUNT = 11000;                                // plateau ×2 → plus de brins pour garder la densité
     const grass = new THREE.InstancedMesh(bg, gm, COUNT);
     const d = new THREE.Object3D();
+    grassOrig = new Array(COUNT); grassXZ = new Float32Array(COUNT * 2);
     for (let i = 0; i < COUNT; i++) {
       let px = 0, pz = 0, tries = 0;
       do { const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * (GARDEN_R - 1); px = Math.cos(a) * r; pz = Math.sin(a) * r; tries++; } while (onRoad(px, pz) && tries < 8);
-      if (onRoad(px, pz)) { d.scale.setScalar(0); d.position.set(0, -5, 0); d.updateMatrix(); grass.setMatrixAt(i, d.matrix); continue; }   // rien sur la route
+      if (onRoad(px, pz)) { d.scale.setScalar(0); d.position.set(0, -5, 0); d.updateMatrix(); grass.setMatrixAt(i, d.matrix); grassOrig[i] = d.matrix.clone(); grassXZ[i * 2] = 0; grassXZ[i * 2 + 1] = 0; continue; }   // rien sur la route
       d.position.set(px, 0, pz);
       d.rotation.set((Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.3);
       d.scale.setScalar(0.7 + Math.random() * 0.8);
       d.updateMatrix();
       grass.setMatrixAt(i, d.matrix);
+      grassOrig[i] = d.matrix.clone(); grassXZ[i * 2] = px; grassXZ[i * 2 + 1] = pz;
     }
-    scene.add(grass);
+    scene.add(grass); grassMesh = grass;
   }
 
   // Obstacles qui font ÉCLATER la bulle (rempli au fur et à mesure : buissons, arbres, maison)
@@ -1331,8 +1333,23 @@
     const rec = { type, mesh: m, scale: s, blades: m.getObjectByName('BLADES') };   // pales à faire tourner
     if (type === 'fountain') rec.water = buildFountainWater(m, s);                   // eau animée par-dessus la fontaine
     EDIT.placed.push(rec);
+    if (GROUND_TYPES[type]) applyGroundMask();                                       // masque l'herbe sous les dalles/passages/allées
     if (select) editSelect(rec);
     return rec;
+  }
+  // masque les brins d'herbe sous les objets de sol posés (dalle, passage piéton, allée)
+  const GROUND_TYPES = { paving: true, crosswalk: true, path: true };
+  const _zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
+  function applyGroundMask() {
+    if (!grassMesh || !grassOrig) return;
+    const boxes = [];
+    for (const rec of EDIT.placed) if (GROUND_TYPES[rec.type]) boxes.push(new THREE.Box3().setFromObject(rec.mesh));
+    for (let i = 0; i < grassOrig.length; i++) {
+      const x = grassXZ[i * 2], z = grassXZ[i * 2 + 1]; let hide = false;
+      for (const b of boxes) { if (x >= b.min.x && x <= b.max.x && z >= b.min.z && z <= b.max.z) { hide = true; break; } }
+      grassMesh.setMatrixAt(i, hide ? _zeroMat : grassOrig[i]);
+    }
+    grassMesh.instanceMatrix.needsUpdate = true;
   }
   function editSelect(rec) {
     EDIT.sel = rec;
@@ -1341,8 +1358,8 @@
     if (rec) { const bb = new THREE.Box3().setFromObject(rec.mesh); editRing.scale.setScalar(Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 + 0.3); editRing.position.set(rec.mesh.position.x, 0.06, rec.mesh.position.z); }
   }
   function editGroundize(m) { m.position.y = 0; m.position.y = -new THREE.Box3().setFromObject(m).min.y; }   // pose la base au sol (indépendant de la position actuelle)
-  function editReground(rec) { rec.mesh.scale.setScalar(rec.scale); editGroundize(rec.mesh); editSelect(rec); }
-  function editDelete() { if (!EDIT.sel) return; scene.remove(EDIT.sel.mesh); EDIT.placed = EDIT.placed.filter(r => r !== EDIT.sel); EDIT.sel = null; if (editRing) editRing.visible = false; editSave(); }
+  function editReground(rec) { rec.mesh.scale.setScalar(rec.scale); editGroundize(rec.mesh); editSelect(rec); if (GROUND_TYPES[rec.type]) applyGroundMask(); }
+  function editDelete() { if (!EDIT.sel) return; const wasGround = GROUND_TYPES[EDIT.sel.type]; scene.remove(EDIT.sel.mesh); EDIT.placed = EDIT.placed.filter(r => r !== EDIT.sel); EDIT.sel = null; if (editRing) editRing.visible = false; if (wasGround) applyGroundMask(); editSave(); }
   function editSerialize() { return EDIT.placed.map(r => ({ type: r.type, x: +r.mesh.position.x.toFixed(2), z: +r.mesh.position.z.toFixed(2), rotY: +r.mesh.rotation.y.toFixed(3), scale: +r.scale.toFixed(3) })); }
   function editSave(opts) {
     const objects = editSerialize();
@@ -1466,7 +1483,7 @@
       else if (EDIT.pan) { const dx = e.clientX - EDIT.lx, dy = e.clientY - EDIT.ly, s = EDIT.dist * 0.0024, fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw); EDIT.tx += (Math.cos(EDIT.yaw) * dx - fx * dy) * s; EDIT.tz += (-fx * dx - fz * dy) * s; EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
       else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); editSelect(EDIT.sel); } }
     });
-    const edUp = () => { if (EDIT.drag || EDIT.orbit) editSave(); EDIT.drag = false; EDIT.orbit = false; EDIT.pan = false; };
+    const edUp = () => { if (EDIT.drag && EDIT.sel && GROUND_TYPES[EDIT.sel.type]) applyGroundMask(); if (EDIT.drag || EDIT.orbit) editSave(); EDIT.drag = false; EDIT.orbit = false; EDIT.pan = false; };
     dom.addEventListener('pointerup', edUp); dom.addEventListener('pointercancel', edUp);
     dom.addEventListener('wheel', (e) => { if (!EDIT.on) return; EDIT.dist = Math.max(2.5, Math.min(80, EDIT.dist + Math.sign(e.deltaY) * Math.max(1.2, EDIT.dist * 0.12))); e.preventDefault(); }, { passive: false });
   }
