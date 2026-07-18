@@ -918,7 +918,7 @@
   //  TRAVERSE ; pendant la traversée les voitures s'arrêtent, puis repartent.
   // ============================================================
   const peds = [];
-  let crossBlock = { active: false, x: 0 }, pedScale = 1;
+  let crossBlock = { active: false, x: 0, halfW: 2.5 }, pedScale = 1;
   const PED_SPEED = 1.5, PED_H = 0.62, PED_MODEL_YAW = 0;
   function pedGroundH(z) {   // hauteur du sol sous le piéton : chaussée / trottoir surélevé / herbe
     const az = Math.abs(z);
@@ -932,10 +932,12 @@
   }
   function applyPedScale(s) { const go = () => { if (peds.length) setPedScale(s); else setTimeout(go, 400); }; go(); }
   const sideZ = (sgn) => ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);     // centre d'un trottoir
-  function nearestCrosswalkX(x) {                                          // x du passage piéton le plus proche (ou null)
+  function nearestCrosswalk(x) {                                          // passage piéton le plus proche : {x, halfW} ou null
     let best = null, bd = 1e9;
-    for (const rec of EDIT.placed) if (rec.type === 'crosswalk') { const d = Math.abs(rec.mesh.position.x - x); if (d < bd) { bd = d; best = rec.mesh.position.x; } }
-    return best;
+    for (const rec of EDIT.placed) if (rec.type === 'crosswalk') { const d = Math.abs(rec.mesh.position.x - x); if (d < bd) { bd = d; best = rec; } }
+    if (!best) return null;
+    const bb = new THREE.Box3().setFromObject(best.mesh);
+    return { x: best.mesh.position.x, halfW: (bb.max.x - bb.min.x) / 2 };   // demi-largeur des bandes le long de la route
   }
   new GLTFLoader().load('models/kid.glb', function (gltf) {
     const root = gltf.scene; root.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
@@ -963,13 +965,13 @@
         if (p.mesh.position.x < -16) { p.mesh.position.x = -16; p.dir = 1; }
         p.crossTimer -= dt;
         if (p.crossTimer <= 0) {
-          const cx = nearestCrosswalkX(p.mesh.position.x);
-          if (cx != null) { p.crossX = cx; p.state = 'goto'; p.dir = (cx > p.mesh.position.x) ? 1 : -1; }
+          const cw = nearestCrosswalk(p.mesh.position.x);
+          if (cw) { p.crossX = cw.x; p.crossHalfW = cw.halfW; p.state = 'goto'; p.dir = (cw.x > p.mesh.position.x) ? 1 : -1; }
           else p.crossTimer = 3;                                         // aucun passage piéton posé → réessaie plus tard
         }
       } else if (p.state === 'goto') {                                   // rejoint le passage piéton sur le trottoir
         vx = p.dir; p.mesh.position.x += p.dir * PED_SPEED * dt;
-        if (Math.abs(p.mesh.position.x - p.crossX) < 0.12) { p.mesh.position.x = p.crossX; p.state = 'cross'; crossBlock.active = true; crossBlock.x = p.crossX; }
+        if (Math.abs(p.mesh.position.x - p.crossX) < 0.12) { p.mesh.position.x = p.crossX; p.state = 'cross'; crossBlock.active = true; crossBlock.x = p.crossX; crossBlock.halfW = p.crossHalfW || 2.5; }
       } else {                                                           // cross : traverse la route
         const targetZ = sideZ(-p.side), s = Math.sign(targetZ - p.mesh.position.z);
         vz = s; p.mesh.position.z += s * PED_SPEED * dt;
@@ -1709,9 +1711,9 @@
       heroCar = null;
       for (const car of cars) {
         let nx = car.mesh.position.x - car.speed * dt;                          // avance vers le joueur
-        if (crossBlock.active) {                                                // piéton qui traverse → ligne d'arrêt AVANT le passage
-          const stopLine = crossBlock.x + carHalfX + 1.4;
-          if (car.mesh.position.x >= stopLine) nx = Math.max(nx, stopLine);     // s'arrête net à la ligne (sauf si déjà engagée)
+        if (crossBlock.active) {                                                // piéton qui traverse → ligne d'arrêt juste AVANT les bandes
+          const stopLine = crossBlock.x + crossBlock.halfW + carHalfX + 0.4;    // roule jusqu'au ras du passage puis s'arrête
+          if (car.mesh.position.x >= stopLine) nx = Math.max(nx, stopLine);     // (sauf si déjà engagée : elle finit de passer)
         }
         car.mesh.position.x = nx;
         if (car.mesh.position.x < hero.position.x - 14) { respawnCar(car); continue; }   // dépassé → réapparaît devant
