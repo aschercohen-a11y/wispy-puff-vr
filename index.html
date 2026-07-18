@@ -1525,7 +1525,8 @@
     }
     if (carScale != null) applyCarScale(carScale);
     if (pedScl != null) applyPedScale(pedScl);
-    if (strScl != null) applyStrollerScale(strScl);
+    // strollerScale ignoré au chargement : taille figée par la calibration atelier (STROLLER_H)
+    void strScl;
     editApplyLayout(objects);
   })();
 
