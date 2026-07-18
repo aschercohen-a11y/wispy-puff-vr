@@ -145,8 +145,9 @@
     heroMesh.add(m);
     heroMixer = new THREE.AnimationMixer(m);
     const clips = gltf.animations || [];
-    // retire le ROOT MOTION (translations) : les anims jouent SUR PLACE, la physique gère le déplacement/saut
-    clips.forEach(c => { c.tracks = c.tracks.filter(t => !/\.position$/.test(t.name)); });
+    // retire le ROOT MOTION : SEULEMENT la translation du bassin (Hips) — on garde toutes les autres
+    // positions (dont la tête/cou) sinon elles se déforment. La physique gère le déplacement/saut.
+    clips.forEach(c => { c.tracks = c.tracks.filter(t => !(t.name.includes('Hips') && t.name.endsWith('.position'))); });
     const walk = clips.find(c => /walk/i.test(c.name)) || clips[0];
     const jump = clips.find(c => /obstacle/i.test(c.name)) || clips.find(c => /jump/i.test(c.name));
     const run  = clips.find(c => /run/i.test(c.name));
