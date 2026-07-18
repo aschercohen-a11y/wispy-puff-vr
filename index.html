@@ -900,30 +900,37 @@
   // ============================================================
   //  TRAFIC : voitures qui FONCENT vers le joueur (à esquiver) — voie gauche/droite au hasard, collision = MORT
   // ============================================================
-  const cars = [];
+  const cars = [];                                     // trafic MIXTE (voitures + bus), chacun ses dimensions
   const CAR_LANES = [-1.5, 1.5];                       // centres des 2 voies (route w=6)
-  const CAR_MODEL_YAW = 0;                             // le modèle regarde -X (avant vers le joueur)
-  let carGroundY = 0, carHalfX = 1, carHalfZ = 0.5, carTop = 1, carMinGap = 5, carBaseBox = null, trafficScale = 0.85;
-  function setTrafficScale(s) {   // applique une taille à toutes les voitures du trafic + recalcule collisions/sol
-    trafficScale = s; if (!carBaseBox) return;
-    carGroundY = -carBaseBox.min.y * s; carTop = (carBaseBox.max.y - carBaseBox.min.y) * s;
-    carHalfX = (carBaseBox.max.x - carBaseBox.min.x) / 2 * s; carHalfZ = (carBaseBox.max.z - carBaseBox.min.z) / 2 * s; carMinGap = carHalfX * 2 + 3;
-    for (const car of cars) { car.mesh.scale.setScalar(s); car.mesh.position.y = carGroundY; }
+  const CAR_MODEL_YAW = 0, BUS_MODEL_YAW = 0;          // les modèles regardent -X (avant vers le joueur)
+  let carBaseBox = null, busBaseBox = null, trafficScale = 0.85, busScale = 1.1;
+  function vehDims(v) {   // recalcule collisions/sol d'UN véhicule selon sa boîte + son échelle
+    const b = v.box, s = v.scale;
+    v.groundY = -b.min.y * s; v.top = (b.max.y - b.min.y) * s;
+    v.halfX = (b.max.x - b.min.x) / 2 * s; v.halfZ = (b.max.z - b.min.z) / 2 * s; v.minGap = v.halfX * 2 + 3;
+    v.mesh.scale.setScalar(s); v.mesh.position.y = v.groundY;
   }
-  function respawnCar(car, x) {
-    car.lane = Math.random() < 0.5 ? 0 : 1;
-    let px = x != null ? x : (hero.position.x + 26 + Math.random() * 34);
-    for (const o of cars) if (o !== car && o.lane === car.lane && Math.abs(o.mesh.position.x - px) < carMinGap) px = o.mesh.position.x + carMinGap + Math.random() * 10;   // jamais coller une voiture
-    car.mesh.position.set(px, carGroundY, CAR_LANES[car.lane]);
-    car.speed = 5 + Math.random() * 4;
+  function setTrafficScale(s) { trafficScale = s; for (const v of cars) if (v.kind === 'car' && v.box) { v.scale = s; vehDims(v); } }
+  function setBusScale(s) { busScale = s; for (const v of cars) if (v.kind === 'bus' && v.box) { v.scale = s; vehDims(v); } }
+  function respawnCar(v, x) {
+    v.lane = Math.random() < 0.5 ? 0 : 1;
+    let px = x != null ? x : (hero.position.x + 30 + Math.random() * 40);
+    for (const o of cars) { const gap = Math.max(v.minGap || 5, o.minGap || 5); if (o !== v && o.lane === v.lane && Math.abs(o.mesh.position.x - px) < gap) px = o.mesh.position.x + gap + Math.random() * 12; }   // jamais coller deux véhicules
+    v.mesh.position.set(px, v.groundY, CAR_LANES[v.lane]);
+    v.speed = 5 + Math.random() * 4;
   }
   new GLTFLoader().load('models/car.glb', function (gltf) {
     const base = gltf.scene; dside(base);
     assetBase.car = base;                                // palette (pristine) → tu règles la taille toi-même
-    carBaseBox = new THREE.Box3().setFromObject(base);   // bbox à l'échelle 1
-    for (let i = 0; i < 6; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); cars.push({ mesh: m }); }
-    setTrafficScale(trafficScale);                       // taille initiale (0.85, ou celle chargée)
-    for (let i = 0; i < cars.length; i++) respawnCar(cars[i], hero.position.x + 12 + i * 16);
+    carBaseBox = new THREE.Box3().setFromObject(base);
+    for (let i = 0; i < 5; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); const v = { mesh: m, box: carBaseBox, kind: 'car', scale: trafficScale }; cars.push(v); vehDims(v); }
+    for (let i = 0; i < cars.length; i++) if (cars[i].kind === 'car') respawnCar(cars[i], hero.position.x + 12 + i * 16);
+  });
+  new GLTFLoader().load('models/bus.glb', function (gltf) {
+    const base = gltf.scene; dside(base);
+    assetBase.bus = base;                                // dispo aussi dans l'éditeur
+    busBaseBox = new THREE.Box3().setFromObject(base);
+    for (let i = 0; i < 2; i++) { const m = base.clone(true); m.rotation.y = BUS_MODEL_YAW; scene.add(m); const v = { mesh: m, box: busBaseBox, kind: 'bus', scale: busScale }; cars.push(v); vehDims(v); respawnCar(v, hero.position.x + 45 + i * 35); }
   });
   // Fumée d'échappement = PARTICULES douces (billboards avec dégradé radial)
   const smoke = [];
@@ -1488,7 +1495,7 @@
   function editSerialize() { return EDIT.placed.map(r => ({ type: r.type, x: +r.mesh.position.x.toFixed(2), z: +r.mesh.position.z.toFixed(2), rotY: +r.mesh.rotation.y.toFixed(3), scale: +r.scale.toFixed(3) })); }
   function editSave(opts) {
     const objects = editSerialize();
-    const data = { objects, carScale: trafficScale, pedScale: pedScale, strollerScale: strollerScale };   // + tailles voitures/piéton/poussette
+    const data = { objects, carScale: trafficScale, pedScale: pedScale, strollerScale: strollerScale, busScale: busScale };   // + tailles voitures/piéton/poussette/bus
     try { localStorage.setItem('wispy_layout', JSON.stringify(data)); } catch (e) {}
     // SÉCURITÉ : l'auto-sauvegarde n'écrase JAMAIS Supabase avec un layout VIDE (seul le bouton force le vide)
     if (objects.length > 0 || (opts && opts.force)) {
@@ -1516,10 +1523,11 @@
     }
   }
   function applyCarScale(s) { const go = () => { if (carBaseBox) setTrafficScale(s); else setTimeout(go, 400); }; go(); }   // attend le chargement de la voiture
+  function applyBusScale(s) { const go = () => { if (busBaseBox) setBusScale(s); else setTimeout(go, 400); }; go(); }       // attend le chargement du bus
   function extractLayout(raw) {   // gère les 2 formats : tableau (ancien) OU {objects, carScale, pedScale}
     if (Array.isArray(raw)) return { objects: raw, carScale: null, pedScale: null };
-    if (raw && typeof raw === 'object') return { objects: raw.objects || [], carScale: (raw.carScale != null ? raw.carScale : null), pedScale: (raw.pedScale != null ? raw.pedScale : null), strollerScale: (raw.strollerScale != null ? raw.strollerScale : null) };
-    return { objects: [], carScale: null, pedScale: null, strollerScale: null };
+    if (raw && typeof raw === 'object') return { objects: raw.objects || [], carScale: (raw.carScale != null ? raw.carScale : null), pedScale: (raw.pedScale != null ? raw.pedScale : null), strollerScale: (raw.strollerScale != null ? raw.strollerScale : null), busScale: (raw.busScale != null ? raw.busScale : null) };
+    return { objects: [], carScale: null, pedScale: null, strollerScale: null, busScale: null };
   }
   // au démarrage : Supabase (partagé) + localStorage, on prend le plus fourni (RÉCUPÉRATION si Supabase vidé)
   (async () => {
@@ -1527,12 +1535,13 @@
     try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); sbRaw = j && j[0] && j[0].data; } } catch (e) {}
     try { lsRaw = JSON.parse(localStorage.getItem('wispy_layout') || 'null'); } catch (e) {}
     const S = extractLayout(sbRaw), L = extractLayout(lsRaw);
-    let objects = S.objects, carScale = S.carScale, pedScl = S.pedScale, strScl = S.strollerScale;
+    let objects = S.objects, carScale = S.carScale, pedScl = S.pedScale, strScl = S.strollerScale, busScl = S.busScale;
     if (L.objects.length > S.objects.length) {          // localStorage plus riche → on restaure
-      objects = L.objects; if (L.carScale != null) carScale = L.carScale; if (L.pedScale != null) pedScl = L.pedScale; if (L.strollerScale != null) strScl = L.strollerScale;
+      objects = L.objects; if (L.carScale != null) carScale = L.carScale; if (L.pedScale != null) pedScl = L.pedScale; if (L.strollerScale != null) strScl = L.strollerScale; if (L.busScale != null) busScl = L.busScale;
       fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1', { method: 'PATCH', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ data: { objects, carScale: carScale != null ? carScale : trafficScale, pedScale: pedScl != null ? pedScl : pedScale, strollerScale: strScl != null ? strScl : strollerScale } }) }).catch(() => {});
     }
     if (carScale != null) applyCarScale(carScale);
+    if (busScl != null) applyBusScale(busScl);
     if (pedScl != null) applyPedScale(pedScl);
     // strollerScale ignoré au chargement : taille figée par la calibration atelier (STROLLER_H)
     void strScl;
@@ -1542,7 +1551,7 @@
   // --- Interface éditeur ---
   const edPanel = document.createElement('div');
   edPanel.style.cssText = 'position:fixed;top:64px;left:12px;z-index:50;background:rgba(12,22,42,.92);border:2px solid #6fd;border-radius:12px;padding:10px;color:#dff;font:13px sans-serif;display:none;max-width:210px;';
-  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>🖐️ Main</b> = active puis glisse pour te déplacer partout · <b>◀ ● ▶</b> = aller début/centre/fin · <b>WASD</b> = déplacer · <b>molette</b> = zoom · <b>clic-droit</b> = tourner la vue · clic sol = poser · clic objet = sélectionner.<br>Objet sélectionné : <b>◄ ►</b> = tourner · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div style="margin-top:8px;display:flex;align-items:center;gap:4px;font-size:12px;"><button id="edHand" style="flex:2;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:13px;">🖐️ Main</button><button id="edGoStart" style="flex:1;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;" title="Début">◀</button><button id="edGoMid" style="flex:1;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;" title="Centre">●</button><button id="edGoEnd" style="flex:1;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;" title="Fin">▶</button></div><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edSave" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;border:0;background:#3fbf5a;color:#fff;font-weight:bold;cursor:pointer;font-size:14px;">💾 Sauvegarder</button><div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;">🚗 Taille voitures :<button id="edCarM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edCarP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">🧍 Taille piéton :<button id="edPedM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edPedP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
+  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>🖐️ Main</b> = active puis glisse pour te déplacer partout · <b>◀ ● ▶</b> = aller début/centre/fin · <b>WASD</b> = déplacer · <b>molette</b> = zoom · <b>clic-droit</b> = tourner la vue · clic sol = poser · clic objet = sélectionner.<br>Objet sélectionné : <b>◄ ►</b> = tourner · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div style="margin-top:8px;display:flex;align-items:center;gap:4px;font-size:12px;"><button id="edHand" style="flex:2;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:13px;">🖐️ Main</button><button id="edGoStart" style="flex:1;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;" title="Début">◀</button><button id="edGoMid" style="flex:1;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;" title="Centre">●</button><button id="edGoEnd" style="flex:1;padding:6px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;" title="Fin">▶</button></div><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edSave" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;border:0;background:#3fbf5a;color:#fff;font-weight:bold;cursor:pointer;font-size:14px;">💾 Sauvegarder</button><div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;">🚗 Taille voitures :<button id="edCarM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edCarP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">🚌 Taille bus :<button id="edBusM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edBusP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">🧍 Taille piéton :<button id="edPedM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edPedP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
   document.body.appendChild(edPanel);
   const edPal = edPanel.querySelector('#edPal');
   function edHighlight() { [...edPal.children].forEach(c => c.style.background = c.dataset.t === EDIT.type ? '#36e0d0' : 'rgba(50,80,120,.5)'); }
@@ -1559,6 +1568,8 @@
   };
   edPanel.querySelector('#edCarM').onclick = () => { setTrafficScale(Math.max(0.3, trafficScale * 0.9)); editSave(); };
   edPanel.querySelector('#edCarP').onclick = () => { setTrafficScale(Math.min(3.5, trafficScale * 1.1)); editSave(); };
+  edPanel.querySelector('#edBusM').onclick = () => { setBusScale(Math.max(0.3, busScale * 0.9)); editSave(); };
+  edPanel.querySelector('#edBusP').onclick = () => { setBusScale(Math.min(4, busScale * 1.1)); editSave(); };
   edPanel.querySelector('#edPedM').onclick = () => { setPedScale(pedScale * 0.9); editSave(); };
   edPanel.querySelector('#edPedP').onclick = () => { setPedScale(pedScale * 1.1); editSave(); };
   const edHandBtn = edPanel.querySelector('#edHand');
@@ -1782,22 +1793,22 @@
       for (const car of cars) {
         let nx = car.mesh.position.x - car.speed * dt;                          // avance vers le joueur
         if (crossBlock.active) {                                                // piéton qui traverse → ligne d'arrêt juste AVANT les bandes
-          const stopLine = crossBlock.x + crossBlock.halfW + carHalfX + 0.4;    // roule jusqu'au ras du passage puis s'arrête
+          const stopLine = crossBlock.x + crossBlock.halfW + car.halfX + 0.4;    // roule jusqu'au ras du passage puis s'arrête
           if (car.mesh.position.x >= stopLine) nx = Math.max(nx, stopLine);     // (sauf si déjà engagée : elle finit de passer)
         }
         car.mesh.position.x = nx;
         if (car.mesh.position.x < hero.position.x - 14) { respawnCar(car); continue; }   // dépassé → réapparaît devant
         const dxc = hero.position.x - car.mesh.position.x, dzc = hero.position.z - car.mesh.position.z;
-        if (Math.abs(dxc) < carHalfX + HERO_RADIUS && Math.abs(dzc) < carHalfZ + HERO_RADIUS) {   // dans l'empreinte
-          if (heroDeadT <= 0 && heroVelY <= 0 && heroPrevY >= carTop - 0.18 && hero.position.y <= carTop + 0.05) {
-            hero.position.y = carTop; heroVelY = 0; heroOnGround = true; heroJumps = 0; heroCar = car;   // ATTERRIT sur le TOIT
-          } else if (heroDeadT <= 0 && heroFallT <= 0 && hero.position.y < carTop - 0.18) {
+        if (Math.abs(dxc) < car.halfX + HERO_RADIUS && Math.abs(dzc) < car.halfZ + HERO_RADIUS) {   // dans l'empreinte
+          if (heroDeadT <= 0 && heroVelY <= 0 && heroPrevY >= car.top - 0.18 && hero.position.y <= car.top + 0.05) {
+            hero.position.y = car.top; heroVelY = 0; heroOnGround = true; heroJumps = 0; heroCar = car;   // ATTERRIT sur le TOIT (voiture OU bus)
+          } else if (heroDeadT <= 0 && heroFallT <= 0 && hero.position.y < car.top - 0.18) {
             heroDeadT = 1.9; if (fallAction) fallAction.reset();                  // PERCUTÉ → MORT
           }
         }
       }
       // ANTI-EMPILEMENT : jamais deux voitures collées dans la même voie
-      for (const a of cars) for (const b of cars) { if (a !== b && a.lane === b.lane) { const gap = a.mesh.position.x - b.mesh.position.x; if (gap > 0 && gap < carMinGap) a.mesh.position.x = b.mesh.position.x + carMinGap; } }
+      for (const a of cars) for (const b of cars) { if (a !== b && a.lane === b.lane) { const mg = Math.max(a.minGap || 5, b.minGap || 5), gap = a.mesh.position.x - b.mesh.position.x; if (gap > 0 && gap < mg) a.mesh.position.x = b.mesh.position.x + mg; } }
       if (heroCar) hero.position.x -= heroCar.speed * dt;                         // porté par la voiture (elle glisse sous lui)
       if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-52, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
       // FUMÉE d'échappement (particules douces qui sortent du pot, montent, s'étalent et s'effacent)
@@ -1807,7 +1818,7 @@
         const c = cars[(Math.random() * cars.length) | 0];
         for (let k = 0; k < 3; k++) {
           const p = smoke[smokeIdx]; smokeIdx = (smokeIdx + 1) % smoke.length;
-          p.position.set(c.mesh.position.x + carHalfX * 0.85 + (Math.random() - 0.5) * 0.12, carGroundY * 0.5 + Math.random() * 0.12, c.mesh.position.z + (Math.random() - 0.5) * 0.28);
+          p.position.set(c.mesh.position.x + (c.halfX || 1) * 0.9 + (Math.random() - 0.5) * 0.12, (c.groundY || 0) * 0.5 + Math.random() * 0.12, c.mesh.position.z + (Math.random() - 0.5) * 0.3);
           p.visible = true; p.userData.life = 0.9 + Math.random() * 0.6;
           p.userData.vx = 0.4 + Math.random() * 0.5; p.userData.vy = 0.45 + Math.random() * 0.5; p.userData.vz = (Math.random() - 0.5) * 0.35;
           p.scale.setScalar(0.1 + Math.random() * 0.08); p.material.opacity = 0.45 + Math.random() * 0.22;
