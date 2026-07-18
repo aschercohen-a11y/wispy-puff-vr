@@ -214,6 +214,10 @@
   // physique + réglages du perso
   let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
   const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 56;   // plateau doublé (route plus longue)
+  // --- MODE SUBWAY SURFERS : auto-run + 3 voies ---
+  const LANES = [-2, 0, 2];                       // gauche / centre / droite (route w=6)
+  let heroLane = 1, runSpeed = 7, laneCd = 0, runLat = 0;   // voie courante · vitesse d'avance · anti-répétition · axe latéral
+  function setLane(d) { heroLane = Math.max(0, Math.min(2, heroLane + d)); }
   const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
   const HERO_RADIUS = 0.28;                   // rayon de collision du perso
   let heroFallT = 0, heroFallVX = 0, heroFallVZ = 0;   // chute : timer + élan « de l'autre côté »
@@ -255,7 +259,7 @@
   function updateFollowRigVR() {
     player.position.set(
       hero.position.x + Math.sin(camYaw) * VR_DIST,
-      VR_HEIGHT,
+      VR_HEIGHT + hero.position.y,          // suit la HAUTEUR du perso (monte quand il grimpe sur un bus)
       hero.position.z + Math.cos(camYaw) * VR_DIST
     );
     player.rotation.y = camYaw;                 // oriente le rig vers le perso (regard neutre = perso en face)
@@ -293,8 +297,8 @@
       case 'KeyG': plant(); break;
       case 'KeyW': case 'ArrowUp': kW = true; break;
       case 'KeyS': case 'ArrowDown': kS = true; break;
-      case 'KeyA': case 'ArrowLeft': kA = true; break;
-      case 'KeyD': case 'ArrowRight': kD = true; break;
+      case 'KeyA': case 'ArrowLeft': kA = true; if (!e.repeat) setLane(-1); break;   // voie à GAUCHE (net)
+      case 'KeyD': case 'ArrowRight': kD = true; if (!e.repeat) setLane(1); break;    // voie à DROITE (net)
       case 'Space': if (!e.repeat) tryJump(); e.preventDefault(); break;
     }
   });
@@ -901,7 +905,7 @@
   //  TRAFIC : voitures qui FONCENT vers le joueur (à esquiver) — voie gauche/droite au hasard, collision = MORT
   // ============================================================
   const cars = [];                                     // trafic MIXTE (voitures + bus), chacun ses dimensions
-  const CAR_LANES = [-1.5, 1.5];                       // centres des 2 voies (route w=6)
+  const CAR_LANES = [-2, 0, 2];                        // 3 voies (gauche/centre/droite) — danger partout
   const CAR_MODEL_YAW = 0, BUS_MODEL_YAW = 0;          // les modèles regardent -X (avant vers le joueur)
   let carBaseBox = null, busBaseBox = null, trafficScale = 0.85, busScale = 1.1;
   function vehDims(v) {   // recalcule collisions/sol d'UN véhicule selon sa boîte + son échelle
@@ -913,7 +917,7 @@
   function setTrafficScale(s) { trafficScale = s; for (const v of cars) if (v.kind === 'car' && v.box) { v.scale = s; vehDims(v); } }
   function setBusScale(s) { busScale = s; for (const v of cars) if (v.kind === 'bus' && v.box) { v.scale = s; vehDims(v); } }
   function respawnCar(v, x) {
-    v.lane = Math.random() < 0.5 ? 0 : 1;
+    v.lane = (Math.random() * CAR_LANES.length) | 0;
     let px = x != null ? x : (hero.position.x + 30 + Math.random() * 40);
     for (const o of cars) { const gap = Math.max(v.minGap || 5, o.minGap || 5); if (o !== v && o.lane === v.lane && Math.abs(o.mesh.position.x - px) < gap) px = o.mesh.position.x + gap + Math.random() * 12; }   // jamais coller deux véhicules
     v.mesh.position.set(px, v.groundY, CAR_LANES[v.lane]);
@@ -1397,20 +1401,9 @@
       const aim = (Math.hypot(rx, ry) > 0.5) ? { x: rx, y: ry } : null;
       if (window.__vrInput) window.__vrInput(mv, aim, blow);
     } else {
-      // PERSO type RUNNER : STRAFE relatif à CE QUE TU REGARDES (casque) → gauche/droite toujours cohérent avec ta vue.
+      // SUBWAY SURFERS VR : le perso court tout seul, le stick gauche = changer de VOIE (net)
       if (GAME_ENABLED && window.__vrInput) window.__vrInput(null, null, false);
-      camera.getWorldDirection(_fwd); _fwd.y = 0;                  // direction du regard (casque), à plat
-      if (_fwd.lengthSq() < 1e-4) _fwd.set(0, 0, -1);
-      _fwd.normalize();
-      _rightv.crossVectors(_fwd, _up).normalize();                // droite par rapport à ta vue
-      heroMoving = Math.hypot(lx, ly) > 0.15 && heroFallT <= 0 && heroDeadT <= 0 && !heroCar;   // idle si porté par une voiture
-      if (heroMoving) {
-        hero.position.addScaledVector(_fwd, -ly * HERO_SPEED * dt);   // avant = où tu regardes
-        hero.position.addScaledVector(_rightv, lx * HERO_SPEED * dt); // strafe G/D relatif à ta vue
-      }
-      const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;          // stick droit = pivote le perso (caméra suit derrière)
-      if (snap && !prevSnap) hero.rotation.y -= snap * Math.PI / 8;
-      prevSnap = snap;
+      runLat = lx;                                                 // axe latéral (appliqué dans la boucle commune)
     }
   }
 
@@ -1660,25 +1653,19 @@
       updateVR(time);
       if (GAME_ENABLED && typeof window.loop === 'function') window.loop(time);
     } else {
-      // MOBILE + PC : MARCHE du perso relative à la caméra (joystick + WASD)
-      let mx = joyX, my = joyY;
-      if (kW) my -= 1; if (kS) my += 1; if (kA) mx -= 1; if (kD) mx += 1;   // clavier PC
-      const mag = Math.hypot(mx, my);
-      heroMoving = mag > 0.05 && heroFallT <= 0 && heroDeadT <= 0 && !heroCar;   // idle si porté par une voiture
-      if (heroMoving) {
-        if (mag > 1) { mx /= mag; my /= mag; }
-        const fwdX = -Math.sin(camYaw), fwdZ = -Math.cos(camYaw);   // avant = s'éloigner de la caméra
-        const rgtX = -fwdZ, rgtZ = fwdX;                            // droite caméra
-        let dx = fwdX * (-my) + rgtX * mx;
-        let dz = fwdZ * (-my) + rgtZ * mx;
-        const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
-        hero.position.x += dx * HERO_SPEED * dt;
-        hero.position.z += dz * HERO_SPEED * dt;
-        const tgt = Math.atan2(dx, dz);                             // oriente le perso vers son déplacement
-        let d = tgt - hero.rotation.y;
-        while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
-        hero.rotation.y += d * Math.min(1, dt * 12);
-      }
+      // MOBILE + PC : le perso court tout seul, le joystick horizontal = changer de VOIE (le clavier gère via keydown)
+      runLat = joyX;                                               // axe latéral (appliqué dans la boucle commune)
+    }
+    // ===== AUTO-RUN + 3 VOIES (commun PC / mobile / VR) =====
+    if (heroDeadT <= 0 && heroFallT <= 0) {
+      laneCd -= dt;
+      if (laneCd <= 0 && Math.abs(runLat) > 0.55) { setLane(runLat > 0 ? 1 : -1); laneCd = 0.28; }   // stick = changement de voie net
+      runSpeed = Math.min(15, runSpeed + dt * 0.2);                // accélère doucement
+      hero.position.x += runSpeed * dt;                            // AVANCE tout seul
+      hero.position.z += (LANES[heroLane] - hero.position.z) * Math.min(1, dt * 14);   // glisse vers la voie
+      hero.rotation.y = Math.PI / 2;                               // toujours face à la route (+X)
+      heroMoving = !heroCar;                                       // anim course (sauf porté par un véhicule)
+      if (hero.position.x > 54) hero.position.x = -52;             // boucle (étape 3 = recyclage sans couture)
     }
     // GRAVITÉ + SAUT du perso (commun PC/mobile/VR) + limite du jardin
     {
@@ -1803,7 +1790,7 @@
       // ANTI-EMPILEMENT : jamais deux voitures collées dans la même voie
       for (const a of cars) for (const b of cars) { if (a !== b && a.lane === b.lane) { const mg = Math.max(a.minGap || 5, b.minGap || 5), gap = a.mesh.position.x - b.mesh.position.x; if (gap > 0 && gap < mg) a.mesh.position.x = b.mesh.position.x + mg; } }
       if (heroCar) hero.position.x -= heroCar.speed * dt;                         // porté par la voiture (elle glisse sous lui)
-      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-52, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
+      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-52, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; heroLane = 1; runSpeed = 7; } }   // respawn au départ (voie centre, vitesse reset)
       // FUMÉE d'échappement (particules douces qui sortent du pot, montent, s'étalent et s'effacent)
       smokeT += dt;
       if (smokeT > 0.02 && cars.length) {
