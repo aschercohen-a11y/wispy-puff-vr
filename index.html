@@ -794,8 +794,8 @@
     const mat = new THREE.MeshStandardMaterial({ color: 0xefe9da, roughness: 1, metalness: 0 });
     const bars = 6, barW = 0.5, gap = 0.4, step = barW + gap, len = 3.2, total = (bars - 1) * step;
     for (let i = 0; i < bars; i++) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(barW, 0.05, len), mat);
-      b.position.set(-total / 2 + i * step, 0.025, 0); grp.add(b);
+      const b = new THREE.Mesh(new THREE.BoxGeometry(barW, 0.012, len), mat);   // bande FINE (peinture, pas un trottoir)
+      b.position.set(-total / 2 + i * step, 0.006, 0); grp.add(b);
     }
     assetBase.crosswalk = grp;                                                                // dispo dans l'éditeur
   }
@@ -1329,6 +1329,7 @@
     m.scale.setScalar(s);
     m.rotation.y = rotY || 0;
     m.position.set(x, 0, z); editGroundize(m);
+    if (type === 'crosswalk') m.position.y = 0.014;      // pile posé sur la surface de la route (pas surélevé)
     scene.add(m);
     const rec = { type, mesh: m, scale: s, blades: m.getObjectByName('BLADES') };   // pales à faire tourner
     if (type === 'fountain') rec.water = buildFountainWater(m, s);                   // eau animée par-dessus la fontaine
@@ -1358,7 +1359,7 @@
     if (rec) { const bb = new THREE.Box3().setFromObject(rec.mesh); editRing.scale.setScalar(Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 + 0.3); editRing.position.set(rec.mesh.position.x, 0.06, rec.mesh.position.z); }
   }
   function editGroundize(m) { m.position.y = 0; m.position.y = -new THREE.Box3().setFromObject(m).min.y; }   // pose la base au sol (indépendant de la position actuelle)
-  function editReground(rec) { rec.mesh.scale.setScalar(rec.scale); editGroundize(rec.mesh); editSelect(rec); if (GROUND_TYPES[rec.type]) applyGroundMask(); }
+  function editReground(rec) { rec.mesh.scale.setScalar(rec.scale); editGroundize(rec.mesh); if (rec.type === 'crosswalk') rec.mesh.position.y = 0.014; editSelect(rec); if (GROUND_TYPES[rec.type]) applyGroundMask(); }
   function editDelete() { if (!EDIT.sel) return; const wasGround = GROUND_TYPES[EDIT.sel.type]; scene.remove(EDIT.sel.mesh); EDIT.placed = EDIT.placed.filter(r => r !== EDIT.sel); EDIT.sel = null; if (editRing) editRing.visible = false; if (wasGround) applyGroundMask(); editSave(); }
   function editSerialize() { return EDIT.placed.map(r => ({ type: r.type, x: +r.mesh.position.x.toFixed(2), z: +r.mesh.position.z.toFixed(2), rotY: +r.mesh.rotation.y.toFixed(3), scale: +r.scale.toFixed(3) })); }
   function editSave(opts) {
@@ -1481,7 +1482,7 @@
       if (!EDIT.on) return;
       if (EDIT.orbit) { EDIT.yaw -= (e.clientX - EDIT.lx) * 0.006; EDIT.pitch = Math.max(0.25, Math.min(1.45, EDIT.pitch + (e.clientY - EDIT.ly) * 0.006)); EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
       else if (EDIT.pan) { const dx = e.clientX - EDIT.lx, dy = e.clientY - EDIT.ly, s = EDIT.dist * 0.0024, fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw); EDIT.tx += (Math.cos(EDIT.yaw) * dx - fx * dy) * s; EDIT.tz += (-fx * dx - fz * dy) * s; EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
-      else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); editSelect(EDIT.sel); } }
+      else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); if (EDIT.sel.type === 'crosswalk') EDIT.sel.mesh.position.y = 0.014; editSelect(EDIT.sel); } }
     });
     const edUp = () => { if (EDIT.drag && EDIT.sel && GROUND_TYPES[EDIT.sel.type]) applyGroundMask(); if (EDIT.drag || EDIT.orbit) editSave(); EDIT.drag = false; EDIT.orbit = false; EDIT.pan = false; };
     dom.addEventListener('pointerup', edUp); dom.addEventListener('pointercancel', edUp);
