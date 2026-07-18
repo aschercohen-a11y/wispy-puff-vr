@@ -129,7 +129,18 @@
     m.position.x -= (box.min.x + box.max.x) / 2;             // centré
     m.position.z -= (box.min.z + box.max.z) / 2;
     m.rotation.y = MODEL_YAW;
-    m.traverse(o => { if (o.isMesh) { o.frustumCulled = false; o.castShadow = false; } });
+    m.traverse(o => {
+      if (!o.isMesh) return;
+      o.frustumCulled = false; o.castShadow = false;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const mat of mats) {                       // fix « on voit l'intérieur du corps » de dos/profil
+        if (!mat) continue;
+        mat.side = THREE.DoubleSide;                  // dessine les 2 faces (normales parfois inversées)
+        mat.transparent = false; mat.opacity = 1;     // aucune transparence
+        mat.depthWrite = true; mat.alphaTest = 0;
+        mat.needsUpdate = true;
+      }
+    });
     heroMesh.add(m);
     heroMixer = new THREE.AnimationMixer(m);
     const clips = gltf.animations || [];
