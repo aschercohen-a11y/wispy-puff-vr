@@ -685,7 +685,7 @@
     base.traverse(o => { if (o.isMesh) { const mats = Array.isArray(o.material) ? o.material : [o.material]; for (const mt of mats) if (mt) mt.side = THREE.DoubleSide; } });
     for (const bx of [-9, -3, 3, 9]) {                 // 4 haies le long de la route
       const m = base.clone(true);
-      m.scale.set(1.6, 0.5, 1.6);                       // aplatie (sautable) + élargie pour couvrir la route
+      m.scale.setScalar(1.0);                           // proportions D'ORIGINE (pas de déformation)
       m.rotation.y = Math.PI / 2;                       // en travers de la route (grand côté = axe Z)
       m.position.set(bx, groundOffset(m), ROAD.z);
       scene.add(m);
