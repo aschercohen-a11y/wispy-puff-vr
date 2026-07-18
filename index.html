@@ -791,11 +791,11 @@
   // --- PASSAGE PIÉTON (procédural) : bandes blanches type zébra, à poser en travers de la route ---
   {
     const grp = new THREE.Group();
-    const mat = new THREE.MeshStandardMaterial({ color: 0xefe9da, roughness: 1, metalness: 0 });
+    const mat = new THREE.MeshStandardMaterial({ color: 0xefe9da, roughness: 1, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     const bars = 6, barW = 0.5, gap = 0.4, step = barW + gap, len = 3.2, total = (bars - 1) * step;
     for (let i = 0; i < bars; i++) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(barW, 0.012, len), mat);   // bande FINE (peinture, pas un trottoir)
-      b.position.set(-total / 2 + i * step, 0.006, 0); grp.add(b);
+      const b = new THREE.Mesh(new THREE.PlaneGeometry(barW, len), mat);        // PLAN à plat (peinture, aucune épaisseur)
+      b.rotation.x = -Math.PI / 2; b.position.set(-total / 2 + i * step, 0, 0); grp.add(b);
     }
     assetBase.crosswalk = grp;                                                                // dispo dans l'éditeur
   }
@@ -920,9 +920,15 @@
   const peds = [];
   let crossBlock = { active: false, x: 0 }, pedScale = 1;
   const PED_SPEED = 1.5, PED_H = 0.62, PED_MODEL_YAW = 0;
+  function pedGroundH(z) {   // hauteur du sol sous le piéton : chaussée / trottoir surélevé / herbe
+    const az = Math.abs(z);
+    if (az <= ROAD.w / 2) return 0.012;                       // sur la route
+    if (az <= ROAD.w / 2 + ROAD.sideW) return ROAD.sideH;     // sur le trottoir (surélevé)
+    return 0;                                                 // herbe
+  }
   function setPedScale(s) {   // taille réglable dans l'éditeur (multiplie l'échelle de base)
     pedScale = Math.max(0.3, Math.min(3, s));
-    for (const p of peds) { p.mesh.scale.setScalar(p.fit * pedScale); p.mesh.position.y = 0; p.mesh.updateMatrixWorld(true); p.mesh.position.y = -new THREE.Box3().setFromObject(p.mesh).min.y; }
+    for (const p of peds) { p.mesh.scale.setScalar(p.fit * pedScale); p.mesh.position.y = 0; p.mesh.updateMatrixWorld(true); p.footOffset = -new THREE.Box3().setFromObject(p.mesh).min.y; }
   }
   function applyPedScale(s) { const go = () => { if (peds.length) setPedScale(s); else setTimeout(go, 400); }; go(); }
   const sideZ = (sgn) => ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);     // centre d'un trottoir
@@ -940,10 +946,11 @@
     clip.tracks = clip.tracks.filter(t => !/Hips\.position$/.test(t.name));   // strip root-motion → marche sur place
     const sgn = -1;
     root.position.set(-8, 0, sideZ(sgn)); root.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(root); root.position.y = -box.min.y;   // pieds au sol
+    const box = new THREE.Box3().setFromObject(root), footOffset = -box.min.y;   // décalage pour poser les pieds au sol
+    root.position.y = footOffset + ROAD.sideH;                                    // départ sur le trottoir surélevé
     scene.add(root);
     const mixer = new THREE.AnimationMixer(root); mixer.clipAction(clip).play();
-    peds.push({ mesh: root, mixer, side: sgn, dir: 1, state: 'walk', crossTimer: 5 + Math.random() * 5, crossX: 0, fit: fit });
+    peds.push({ mesh: root, mixer, side: sgn, dir: 1, state: 'walk', crossTimer: 5 + Math.random() * 5, crossX: 0, fit: fit, footOffset: footOffset });
   });
   function updatePeds(dt) {
     for (const p of peds) {
@@ -969,6 +976,7 @@
         if (Math.abs(targetZ - p.mesh.position.z) < 0.06) { p.mesh.position.z = targetZ; p.side = -p.side; p.state = 'walk'; p.dir = Math.random() < 0.5 ? 1 : -1; p.crossTimer = 6 + Math.random() * 6; crossBlock.active = false; }
       }
       if (vx || vz) p.mesh.rotation.y = Math.atan2(vx, vz) + PED_MODEL_YAW;   // face au déplacement
+      p.mesh.position.y = p.footOffset + pedGroundH(p.mesh.position.z);       // suit trottoir/route/herbe
     }
   }
   let smokeIdx = 0, smokeT = 0;
