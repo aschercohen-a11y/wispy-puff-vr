@@ -708,23 +708,34 @@
   // ============================================================
   const cars = [];
   const CAR_LANES = [-1.5, 1.5];                       // centres des 2 voies (route w=6)
-  const CAR_MODEL_YAW = 0;                             // le modèle regarde -X (avant vers le joueur) — plus de marche arrière
-  let carGroundY = 0, carHalfX = 1, carHalfZ = 0.5, carTop = 1;
+  const CAR_MODEL_YAW = 0;                             // le modèle regarde -X (avant vers le joueur)
+  let carGroundY = 0, carHalfX = 1, carHalfZ = 0.5, carTop = 1, carMinGap = 5, carBaseBox = null, trafficScale = 0.85;
+  function setTrafficScale(s) {   // applique une taille à toutes les voitures du trafic + recalcule collisions/sol
+    trafficScale = s; if (!carBaseBox) return;
+    carGroundY = -carBaseBox.min.y * s; carTop = (carBaseBox.max.y - carBaseBox.min.y) * s;
+    carHalfX = (carBaseBox.max.x - carBaseBox.min.x) / 2 * s; carHalfZ = (carBaseBox.max.z - carBaseBox.min.z) / 2 * s; carMinGap = carHalfX * 2 + 3;
+    for (const car of cars) { car.mesh.scale.setScalar(s); car.mesh.position.y = carGroundY; }
+  }
   function respawnCar(car, x) {
     car.lane = Math.random() < 0.5 ? 0 : 1;
-    car.mesh.position.set(x != null ? x : (hero.position.x + 26 + Math.random() * 34), carGroundY, CAR_LANES[car.lane]);
+    let px = x != null ? x : (hero.position.x + 26 + Math.random() * 34);
+    for (const o of cars) if (o !== car && o.lane === car.lane && Math.abs(o.mesh.position.x - px) < carMinGap) px = o.mesh.position.x + carMinGap + Math.random() * 10;   // jamais coller une voiture
+    car.mesh.position.set(px, carGroundY, CAR_LANES[car.lane]);
     car.speed = 5 + Math.random() * 4;
   }
   new GLTFLoader().load('models/car.glb', function (gltf) {
-    const base = gltf.scene; dside(base); base.scale.setScalar(0.85);
-    const bb = new THREE.Box3().setFromObject(base);
-    carGroundY = -bb.min.y; carHalfX = (bb.max.x - bb.min.x) / 2; carHalfZ = (bb.max.z - bb.min.z) / 2; carTop = bb.max.y - bb.min.y;
-    for (let i = 0; i < 4; i++) {
-      const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m);
-      const car = { mesh: m }; cars.push(car);
-      respawnCar(car, hero.position.x + 12 + i * 16);   // étalées devant au départ
-    }
+    const base = gltf.scene; dside(base);
+    assetBase.car = base;                                // palette (pristine) → tu règles la taille toi-même
+    carBaseBox = new THREE.Box3().setFromObject(base);   // bbox à l'échelle 1
+    for (let i = 0; i < 4; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); cars.push({ mesh: m }); }
+    setTrafficScale(EDIT_TYPES.car.s);                   // taille initiale
+    for (let i = 0; i < cars.length; i++) respawnCar(cars[i], hero.position.x + 12 + i * 16);
   });
+  // Fumée d'échappement (pool de petites sphères grises)
+  const smoke = [];
+  { const sg = new THREE.SphereGeometry(1, 8, 6);
+    for (let i = 0; i < 26; i++) { const s = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ color: 0xc2c7cb, transparent: true, opacity: 0, depthWrite: false })); s.visible = false; s.userData = { life: 0, vy: 0 }; scene.add(s); smoke.push(s); } }
+  let smokeIdx = 0, smokeT = 0;
 
   // --- Arbres low-poly (Poly Pizza) plantés ---
   new GLTFLoader().load('models/pp_tree.glb', function (gltf) {
@@ -1105,6 +1116,7 @@
     windmill: { label: '🌬️ Moulin',         s: 2.8 },
     windmill2:{ label: '🌀 Moulin animé',   s: 2.8 },
     lamp:     { label: '🏮 Lampadaire',      s: 1.6 },
+    car:      { label: '🚗 Voiture (taille)', s: 0.85 },
     carrot:   { label: '🥕 Maison carotte', s: 3.2 },
     cottage:  { label: '🏠 Chaumière',      s: 2.2 },
     mushroom: { label: '🍄 Champignon',     s: 0.32 },
@@ -1399,6 +1411,9 @@
     //  TRAFIC : voitures foncent vers le joueur (-X). TOIT = plateforme (sauter dessus = OK). Côté/avant = MORT.
     // ============================================================
     {
+      // la taille des voitures du trafic suit la voiture posée dans l'éditeur (tu la règles avec ▲▼)
+      const refCar = EDIT.placed.find(r => r.type === 'car');
+      if (refCar && Math.abs(refCar.scale - trafficScale) > 0.001) setTrafficScale(refCar.scale);
       heroCar = null;
       for (const car of cars) {
         car.mesh.position.x -= car.speed * dt;                                   // avance vers le joueur
@@ -1412,8 +1427,14 @@
           }
         }
       }
+      // ANTI-EMPILEMENT : jamais deux voitures collées dans la même voie
+      for (const a of cars) for (const b of cars) { if (a !== b && a.lane === b.lane) { const gap = a.mesh.position.x - b.mesh.position.x; if (gap > 0 && gap < carMinGap) a.mesh.position.x = b.mesh.position.x + carMinGap; } }
       if (heroCar) hero.position.x -= heroCar.speed * dt;                         // porté par la voiture (elle glisse sous lui)
       if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-11, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
+      // FUMÉE d'échappement
+      smokeT += dt;
+      if (smokeT > 0.09 && cars.length) { smokeT = 0; const c = cars[(Math.random() * cars.length) | 0]; const p = smoke[smokeIdx]; smokeIdx = (smokeIdx + 1) % smoke.length; p.position.set(c.mesh.position.x + carHalfX * 0.9, carGroundY * 0.6, c.mesh.position.z + (Math.random() - 0.5) * 0.2); p.visible = true; p.userData.life = 1; p.userData.vy = 0.3 + Math.random() * 0.3; p.scale.setScalar(0.1); p.material.opacity = 0.5; }
+      for (const p of smoke) { if (!p.visible) continue; p.userData.life -= dt * 1.3; if (p.userData.life <= 0) { p.visible = false; continue; } p.position.x += dt * 0.6; p.position.y += p.userData.vy * dt; p.scale.setScalar(0.1 + (1 - p.userData.life) * 0.4); p.material.opacity = 0.45 * p.userData.life; }
     }
     // cristaux : rotation + flottement + COLLECTE (par le PERSO)
     _chest.set(hero.position.x, hero.position.y + 0.5, hero.position.z);   // corps du perso
