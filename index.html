@@ -725,7 +725,7 @@
   });
 
   // --- Maisons Meshy (chargées uniquement comme BASE pour la palette de l'éditeur) ---
-  ['house1', 'house2', 'bakery', 'windmill'].forEach(function (key) {
+  ['house1', 'house2', 'bakery', 'windmill', 'lamp'].forEach(function (key) {
     const file = key === 'bakery' ? 'house_bakery' : key;
     new GLTFLoader().load('models/' + file + '.glb', function (gltf) {
       const b = gltf.scene;
@@ -1065,6 +1065,7 @@
     house2:   { label: '🏘️ Maison 2',       s: 2.8 },
     bakery:   { label: '🥐 Boulangerie',    s: 2.8 },
     windmill: { label: '🌬️ Moulin',         s: 2.8 },
+    lamp:     { label: '🏮 Lampadaire',      s: 1.6 },
     carrot:   { label: '🥕 Maison carotte', s: 3.2 },
     cottage:  { label: '🏠 Chaumière',      s: 2.2 },
     mushroom: { label: '🍄 Champignon',     s: 0.32 },
