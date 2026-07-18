@@ -116,10 +116,10 @@
   hero.rotation.y = Math.PI;                 // regarde vers le centre du jardin
   scene.add(hero);
 
-  const HERO_HEIGHT = 0.7;                   // taille cible du perso (unités monde)
+  const HERO_HEIGHT = 0.55;                  // taille cible du perso (unités monde)
   const MODEL_YAW = 0;                        // orientation du modèle (validé : on voit le dos en marche avant)
-  let heroMixer = null, walkAction = null, runAction = null, jumpAction = null, idleAction = null, heroReady = false;
-  let heroWasAir = false, heroJumpW = 0, heroWalkW = 0, heroIdleW = 0;   // fondus idle/walk/jump
+  let heroMixer = null, walkAction = null, runAction = null, jumpAction = null, idleAction = null, fallAction = null, heroReady = false;
+  let heroWasAir = false, heroJumpW = 0, heroWalkW = 0, heroIdleW = 0, heroFallW = 0;   // fondus idle/walk/jump/fall
   new GLTFLoader().load('models/character.glb?v=1', function (gltf) {
     const m = gltf.scene;
     let box = new THREE.Box3().setFromObject(m);
@@ -151,10 +151,12 @@
     const walk = clips.find(c => /walk/i.test(c.name)) || clips[0];
     const jump = clips.find(c => /obstacle/i.test(c.name)) || clips.find(c => /jump/i.test(c.name));
     const run  = clips.find(c => /run/i.test(c.name));
-    const idle = clips.find(c => !/walk|run|jump|obstacle/i.test(c.name));   // l'idle (ex: Lower_Weapon_Look_Raise)
+    const fall = clips.find(c => /fall/i.test(c.name));
+    const idle = clips.find(c => !/walk|run|jump|obstacle|fall/i.test(c.name));   // l'idle (Lower_Weapon_Look_Raise)
     if (walk) { walkAction = heroMixer.clipAction(walk); walkAction.play(); walkAction.setEffectiveWeight(0); }
     if (jump) { jumpAction = heroMixer.clipAction(jump); jumpAction.setLoop(THREE.LoopRepeat); jumpAction.play(); jumpAction.setEffectiveWeight(0); }
     if (idle) { idleAction = heroMixer.clipAction(idle); idleAction.play(); idleAction.setEffectiveWeight(1); }
+    if (fall) { fallAction = heroMixer.clipAction(fall); fallAction.setLoop(THREE.LoopOnce); fallAction.clampWhenFinished = true; fallAction.play(); fallAction.setEffectiveWeight(0); }
     if (run)  { runAction = heroMixer.clipAction(run); }
     heroReady = true;
   });
@@ -163,7 +165,9 @@
   let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
   const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 14;
   const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
-  function tryJump() { if (heroOnGround) { heroVelY = HERO_JUMP; heroOnGround = false; } }
+  const HERO_RADIUS = 0.28;                   // rayon de collision du perso
+  let heroFallT = 0;                          // timer de chute (>0 = le perso est tombé, immobilisé)
+  function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
 
   // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
   let camYaw = Math.PI, camPitch = 0.42;
@@ -599,6 +603,7 @@
 
   // --- Champignons (models/mushroom.glb) plantés sur l'herbe, avec dandinement cartoon ---
   const mushrooms = [];                                 // pour l'animation cartoon
+  const mushroomObstacles = [];                         // {x,z,r,top} : à SAUTER par-dessus (sinon le perso tombe)
   new GLTFLoader().load('models/mushroom.glb?v=2', function (gltf) {
     const base = gltf.scene;
     mushroomBase = base;                                // réutilisé pour le jardinage
@@ -615,6 +620,8 @@
       scene.add(m);
       m.userData.mush = { base: spots[i].s, ph: Math.random() * 6.28 };
       mushrooms.push(m);
+      const bb = new THREE.Box3().setFromObject(m);       // obstacle : rayon + hauteur du chapeau
+      mushroomObstacles.push({ x: spots[i].x, z: spots[i].z, r: Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 * 0.7, top: bb.max.y * 0.75 });
     }
   });
 
@@ -969,7 +976,7 @@
       if (GAME_ENABLED && window.__vrInput) window.__vrInput(null, null, false);
       const fwdX = -Math.sin(camYaw), fwdZ = -Math.cos(camYaw);   // avant = s'éloigner de la caméra
       const rgtX = -fwdZ, rgtZ = fwdX;
-      heroMoving = Math.hypot(lx, ly) > 0.15;
+      heroMoving = Math.hypot(lx, ly) > 0.15 && heroFallT <= 0;    // bloqué pendant la chute
       if (heroMoving) {
         let dx = fwdX * (-ly) + rgtX * lx;
         let dz = fwdZ * (-ly) + rgtZ * lx;
@@ -998,7 +1005,7 @@
       let mx = joyX, my = joyY;
       if (kW) my -= 1; if (kS) my += 1; if (kA) mx -= 1; if (kD) mx += 1;   // clavier PC
       const mag = Math.hypot(mx, my);
-      heroMoving = mag > 0.05;
+      heroMoving = mag > 0.05 && heroFallT <= 0;                            // bloqué pendant la chute
       if (heroMoving) {
         if (mag > 1) { mx /= mag; my /= mag; }
         const fwdX = -Math.sin(camYaw), fwdZ = -Math.cos(camYaw);   // avant = s'éloigner de la caméra
@@ -1021,17 +1028,35 @@
       if (hero.position.y <= 0) { hero.position.y = 0; heroVelY = 0; heroOnGround = true; }
       const hpr = Math.hypot(hero.position.x, hero.position.z);
       if (hpr > HERO_CLAMP) { hero.position.x *= HERO_CLAMP / hpr; hero.position.z *= HERO_CLAMP / hpr; }
-      // ANIMATION du perso : Jump (en l'air) / Walking (bouge au sol) / Idle (arrêt) — fondus doux
+      // COLLISION CHAMPIGNONS : impossible de les traverser → il faut SAUTER par-dessus, sinon on TOMBE
+      for (const o of mushroomObstacles) {
+        const ox = hero.position.x - o.x, oz = hero.position.z - o.z;
+        const rr = o.r + HERO_RADIUS, od2 = ox * ox + oz * oz;
+        if (od2 < rr * rr && hero.position.y < o.top - 0.05) {   // dans le champignon ET pas passé au-dessus
+          const od = Math.sqrt(od2) || 0.0001, push = rr - od;
+          hero.position.x += (ox / od) * push;                   // repoussé hors du champignon
+          hero.position.z += (oz / od) * push;
+          if (heroOnGround && heroMoving && heroFallT <= 0) {     // il fonçait dedans au sol → il TOMBE
+            heroFallT = 1.2;
+            if (fallAction) fallAction.reset();
+          }
+        }
+      }
+      if (heroFallT > 0) heroFallT = Math.max(0, heroFallT - dt);
+      // ANIMATION : Fall (tombé) > Jump (en l'air) > Walking (bouge) > Idle (arrêt) — fondus doux
       if (heroMixer) {
-        const airborne = !heroOnGround;
+        const airborne = !heroOnGround, falling = heroFallT > 0;
         if (airborne && !heroWasAir && jumpAction) jumpAction.reset();   // relance le saut au décollage
         heroWasAir = airborne;
-        const jT = airborne ? 1 : 0;
-        const wT = (!airborne && heroMoving) ? 1 : 0;
-        const iT = (!airborne && !heroMoving) ? 1 : 0;
+        const fT = falling ? 1 : 0;
+        const jT = (!falling && airborne) ? 1 : 0;
+        const wT = (!falling && !airborne && heroMoving) ? 1 : 0;
+        const iT = (!falling && !airborne && !heroMoving) ? 1 : 0;
+        heroFallW += (fT - heroFallW) * Math.min(1, dt * 14);
         heroJumpW += (jT - heroJumpW) * Math.min(1, dt * 14);
         heroWalkW += (wT - heroWalkW) * Math.min(1, dt * 10);
         heroIdleW += (iT - heroIdleW) * Math.min(1, dt * 10);
+        if (fallAction) fallAction.setEffectiveWeight(heroFallW);
         if (jumpAction) jumpAction.setEffectiveWeight(heroJumpW);
         if (walkAction) { walkAction.setEffectiveWeight(heroWalkW); walkAction.timeScale = 1.3; }
         if (idleAction) idleAction.setEffectiveWeight(heroIdleW);
