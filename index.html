@@ -948,7 +948,7 @@
   }
   function setPedScale(s) {   // taille réglable dans l'éditeur (multiplie l'échelle de base)
     pedScale = Math.max(0.3, Math.min(3, s));
-    for (const p of peds) { p.mesh.scale.setScalar(p.fit * pedScale); p.mesh.position.y = 0; p.mesh.updateMatrixWorld(true); p.footOffset = -new THREE.Box3().setFromObject(p.mesh).min.y; if (p.stroller && p.strollerFit) { p.stroller.scale.setScalar(p.strollerFit * pedScale * strollerScale); p.stroller.position.y = 0; p.stroller.updateMatrixWorld(true); p.stroller.userData.foot = -new THREE.Box3().setFromObject(p.stroller).min.y; } }
+    for (const p of peds) { p.mesh.scale.setScalar(p.fit * pedScale); p.mesh.position.y = 0; p.mesh.updateMatrixWorld(true); p.footOffset = -new THREE.Box3().setFromObject(p.mesh).min.y; }
   }
   function applyPedScale(s) { const go = () => { if (peds.length) setPedScale(s); else setTimeout(go, 400); }; go(); }
   const sideZ = (sgn) => ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);     // centre d'un trottoir
@@ -961,10 +961,10 @@
   }
   // pose "pousser" des bras (delta appliqué par-dessus la pose de repos) — ajustable
   const ARM_POSE = { LeftArm: [0, 0, 1.25], RightArm: [0, 0, -1.25], LeftForeArm: [0, 0, 0.35], RightForeArm: [0, 0, -0.35] };
-  const STROLLER_DIST = 0.28, STROLLER_H = 0.5, STROLLER_YAW = Math.PI / 2;   // poignée côté femme (avant du modèle = -X)
-  function setStrollerScale(s) {   // taille de la poussette réglable dans l'éditeur
+  const STROLLER_DIST = 0.28, STROLLER_H = 0.42, STROLLER_YAW = Math.PI / 2;   // poignée côté femme (avant du modèle = -X)
+  function setStrollerScale(s) {   // taille de la poussette réglable dans l'éditeur (indépendante de la taille piéton)
     strollerScale = Math.max(0.2, Math.min(3, s));
-    for (const p of peds) if (p.stroller && p.strollerFit) { p.stroller.scale.setScalar(p.strollerFit * pedScale * strollerScale); p.stroller.position.y = 0; p.stroller.updateMatrixWorld(true); p.stroller.userData.foot = -new THREE.Box3().setFromObject(p.stroller).min.y; }
+    for (const p of peds) if (p.stroller && p.strollerFit) { p.stroller.scale.setScalar(p.strollerFit * strollerScale); p.stroller.position.y = 0; p.stroller.updateMatrixWorld(true); p.stroller.userData.foot = -new THREE.Box3().setFromObject(p.stroller).min.y; }
   }
   function applyStrollerScale(s) { const go = () => { let ok = false; for (const p of peds) if (p.stroller) ok = true; if (ok) setStrollerScale(s); else setTimeout(go, 400); }; go(); }
   const _q = new THREE.Quaternion(), _e = new THREE.Euler();
@@ -990,7 +990,7 @@
           const st = g2.scene; st.traverse(o => { if (o.isMesh) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
           st.updateMatrixWorld(true);
           const sb = new THREE.Box3().setFromObject(st), sh = (sb.max.y - sb.min.y) || 1; p.strollerFit = STROLLER_H / sh;
-          st.scale.setScalar(p.strollerFit * pedScale * strollerScale);
+          st.scale.setScalar(p.strollerFit * strollerScale);
           st.updateMatrixWorld(true); const sb2 = new THREE.Box3().setFromObject(st); st.userData.foot = -sb2.min.y;
           scene.add(st); p.stroller = st;
         });
@@ -1029,7 +1029,7 @@
       p.mesh.position.y = p.footOffset + pedGroundH(p.mesh.position.z);       // suit trottoir/route/herbe
       if (p.armBones) for (const a of p.armBones) a.bone.quaternion.copy(a.bind).multiply(a.delta);   // bras figés sur la barre (après l'anim)
       if (p.stroller) {                                                       // poussette devant, avance avec la femme
-        const rot = p.mesh.rotation.y, fx = Math.sin(rot), fz = Math.cos(rot), dist = STROLLER_DIST * pedScale;
+        const rot = p.mesh.rotation.y, fx = Math.sin(rot), fz = Math.cos(rot), dist = STROLLER_DIST;
         p.stroller.position.set(p.mesh.position.x + fx * dist, (p.stroller.userData.foot || 0) + pedGroundH(p.mesh.position.z), p.mesh.position.z + fz * dist);
         p.stroller.rotation.y = rot + STROLLER_YAW;
       }
