@@ -788,20 +788,22 @@
   const FW = { BASIN_Y: -0.06, BASIN_R: 0.58, BOWL_Y: 0.30, BOWL_R: 0.23, SPOUT_Y: 0.34, JT_R: 0.30, JT_Y: 0.24, LAND_R: 0.46 };
   function buildFountainWater(m, s) {
     const grp = new THREE.Group(); grp.name = 'WATER'; const jets = [], ripples = [];
-    const dropMat = new THREE.PointsMaterial({ map: _dropTex, size: 0.055 * s, transparent: true, depthWrite: false, opacity: 0.9, blending: THREE.AdditiveBlending, sizeAttenuation: true, color: 0xbfefff });
-    // jet central
-    const cN = 16, cPos = new Float32Array(cN * 3), cPh = new Float32Array(cN);
+    const dropMat = new THREE.PointsMaterial({ map: _dropTex, size: 0.085 * s, transparent: true, depthWrite: false, opacity: 0.95, blending: THREE.AdditiveBlending, sizeAttenuation: true, color: 0xbfefff });
+    // jet central (colonne bien fournie qui fane légèrement)
+    const cN = 50, cPos = new Float32Array(cN * 3), cPh = new Float32Array(cN);
     for (let i = 0; i < cN; i++) cPh[i] = i / cN;
     const cGeo = new THREE.BufferGeometry(); cGeo.setAttribute('position', new THREE.BufferAttribute(cPos, 3));
     const cPts = new THREE.Points(cGeo, dropMat); cPts.frustumCulled = false; grp.add(cPts);
     jets.push({ type: 'c', pos: cPos, ph: cPh, geo: cGeo });
-    // 4 cascades latérales
+    // 4 cascades latérales = RUBANS épais (plusieurs brins côte à côte)
     for (let k = 0; k < 4; k++) {
-      const ang = k * Math.PI / 2 + Math.PI / 4, sN = 11, pos = new Float32Array(sN * 3), ph = new Float32Array(sN);
-      for (let i = 0; i < sN; i++) ph[i] = i / sN;
+      const ang = k * Math.PI / 2 + Math.PI / 4, strands = 5, perStrand = 8, sN = strands * perStrand;
+      const pos = new Float32Array(sN * 3), ph = new Float32Array(sN), off = new Float32Array(sN);
+      let idx = 0;
+      for (let a = 0; a < strands; a++) for (let b = 0; b < perStrand; b++) { ph[idx] = b / perStrand + a * 0.015; off[idx] = (a - (strands - 1) / 2) / (strands - 1); idx++; }
       const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       const pts = new THREE.Points(geo, dropMat); pts.frustumCulled = false; grp.add(pts);
-      jets.push({ type: 's', ang: ang, pos: pos, ph: ph, geo: geo });
+      jets.push({ type: 's', ang: ang, pos: pos, ph: ph, off: off, geo: geo });
     }
     // ondulations (2 disques miroitants)
     for (const r of [{ R: FW.BASIN_R, Y: FW.BASIN_Y, seg: 40 }, { R: FW.BOWL_R, Y: FW.BOWL_Y, seg: 28 }]) {
@@ -817,14 +819,14 @@
     for (const j of w.jets) {
       const p = j.pos, n = j.ph.length;
       if (j.type === 'c') {
-        for (let i = 0; i < n; i++) { const f = (j.ph[i] + t * 0.8) % 1, y = FW.SPOUT_Y + 0.15 * 4 * f * (1 - f), r = 0.02 + 0.05 * f, a = i * 2.399; p[i * 3] = Math.cos(a) * r; p[i * 3 + 1] = y; p[i * 3 + 2] = Math.sin(a) * r; }
+        for (let i = 0; i < n; i++) { const f = (j.ph[i] + t * 0.8) % 1, y = FW.SPOUT_Y + 0.19 * 4 * f * (1 - f), r = 0.02 + 0.085 * f, a = i * 2.399; p[i * 3] = Math.cos(a) * r; p[i * 3 + 1] = y; p[i * 3 + 2] = Math.sin(a) * r; }
       } else {
-        const ca = Math.cos(j.ang), sa = Math.sin(j.ang);
-        for (let i = 0; i < n; i++) { const f = (j.ph[i] + t * 0.7) % 1, r = FW.JT_R + (FW.LAND_R - FW.JT_R) * f, y = FW.JT_Y + (FW.BASIN_Y - FW.JT_Y) * (f * f); p[i * 3] = ca * r; p[i * 3 + 1] = y; p[i * 3 + 2] = sa * r; }
+        const ca = Math.cos(j.ang), sa = Math.sin(j.ang), tx = -sa, tz = ca;   // tangente horizontale (largeur du ruban)
+        for (let i = 0; i < n; i++) { const f = (j.ph[i] + t * 0.7) % 1, r = FW.JT_R + (FW.LAND_R - FW.JT_R) * f, y = FW.JT_Y + (FW.BASIN_Y - FW.JT_Y) * (f * f), band = 0.11 * j.off[i]; p[i * 3] = ca * r + tx * band; p[i * 3 + 1] = y; p[i * 3 + 2] = sa * r + tz * band; }
       }
       j.geo.attributes.position.needsUpdate = true;
     }
-    for (let i = 0; i < w.ripples.length; i++) { const mp = w.ripples[i].material.map; if (mp) { mp.offset.x = Math.sin(t * 0.3 + i) * 0.06; mp.offset.y = (t * 0.04 * (i + 1)) % 1; mp.rotation = t * 0.08 * (i ? -1 : 1); } w.ripples[i].material.opacity = 0.26 + 0.12 * Math.sin(t * 1.4 + i * 2); }
+    for (let i = 0; i < w.ripples.length; i++) { const mp = w.ripples[i].material.map; if (mp) { mp.offset.x = Math.sin(t * 0.3 + i) * 0.06; mp.offset.y = (t * 0.04 * (i + 1)) % 1; mp.rotation = t * 0.08 * (i ? -1 : 1); } w.ripples[i].material.opacity = 0.4 + 0.15 * Math.sin(t * 1.4 + i * 2); }
   }
   new GLTFLoader().load('models/fountain.glb?v=1', function (gltf) {
     const base = gltf.scene; base.traverse(o => { if (o.isMesh && o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
