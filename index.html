@@ -1708,8 +1708,12 @@
       updatePeds(dt);                                                            // piétons (marche + traversée)
       heroCar = null;
       for (const car of cars) {
-        const wait = crossBlock.active && car.mesh.position.x > crossBlock.x && (car.mesh.position.x - crossBlock.x) < 16;   // s'arrête pour laisser passer le piéton
-        if (!wait) car.mesh.position.x -= car.speed * dt;                        // avance vers le joueur
+        let nx = car.mesh.position.x - car.speed * dt;                          // avance vers le joueur
+        if (crossBlock.active) {                                                // piéton qui traverse → ligne d'arrêt AVANT le passage
+          const stopLine = crossBlock.x + carHalfX + 1.4;
+          if (car.mesh.position.x >= stopLine) nx = Math.max(nx, stopLine);     // s'arrête net à la ligne (sauf si déjà engagée)
+        }
+        car.mesh.position.x = nx;
         if (car.mesh.position.x < hero.position.x - 14) { respawnCar(car); continue; }   // dépassé → réapparaît devant
         const dxc = hero.position.x - car.mesh.position.x, dzc = hero.position.z - car.mesh.position.z;
         if (Math.abs(dxc) < carHalfX + HERO_RADIUS && Math.abs(dzc) < carHalfZ + HERO_RADIUS) {   // dans l'empreinte
