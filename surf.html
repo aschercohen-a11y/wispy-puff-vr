@@ -216,7 +216,7 @@
   let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
   const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 56;   // plateau doublé (route plus longue)
   // --- MODE SUBWAY SURFERS : auto-run + 3 voies ---
-  const LANES = [-3, 0, 3];                       // gauche / centre / droite (route w=9, bien espacées)
+  const LANES = [-2, 0, 2];                       // gauche / centre / droite (route w=9, bien espacées)
   let heroLane = 1, runSpeed = 7, laneCd = 0, runLat = 0;   // voie courante · vitesse d'avance · anti-répétition · axe latéral
   function setLane(d) { heroLane = Math.max(0, Math.min(2, heroLane + d)); }
   let roadMesh = null, roadTex = null; const sideMeshes = [];   // sol infini (suit le perso, marquage qui défile)
@@ -236,7 +236,7 @@
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
-  const ROAD = { z: 0, len: 180, w: 9, sideW: 3.2, sideH: 0.22 };   // route ÉLARGIE (w 6→9) ; TRÈS longue (bord caché dans le brouillard) ; trottoirs 3.2
+  const ROAD = { z: 0, len: 180, w: 6, sideW: 3.2, sideH: 0.22 };   // MÊME largeur que le village (w6) → déco alignée pile pareil ; TRÈS longue (bord dans le brouillard)
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
   function tryJump() {
@@ -698,7 +698,7 @@
     base.traverse(function (o) {
       if (o.isMesh && o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) { mt.metalness = 0.25; mt.roughness = 0.35; mt.emissive = new THREE.Color(0x4a3200); mt.emissiveIntensity = 0.35; mt.side = THREE.DoubleSide; } }); }
     });
-    const S = 0.34, lanes = [-3, 0, 3], spots = [];         // 3 voies du runner
+    const S = 0.34, lanes = [-2, 0, 2], spots = [];         // 3 voies du runner
     let li = 0, seg = 0;
     for (let x = -50; x <= 52; x += 2.0) {
       const z = lanes[li % 3], phase = seg % 10;
@@ -920,7 +920,7 @@
   //  TRAFIC : voitures qui FONCENT vers le joueur (à esquiver) — voie gauche/droite au hasard, collision = MORT
   // ============================================================
   const cars = [];                                     // trafic MIXTE (voitures + bus), chacun ses dimensions
-  const CAR_LANES = [-3, 0, 3];                        // 3 voies (gauche/centre/droite) — danger partout
+  const CAR_LANES = [-2, 0, 2];                        // 3 voies (gauche/centre/droite) — danger partout
   const CAR_MODEL_YAW = 0, BUS_MODEL_YAW = 0;          // les modèles regardent -X (avant vers le joueur)
   let carBaseBox = null, busBaseBox = null, trafficScale = 0.85, busScale = 1.1;
   function vehDims(v) {   // recalcule collisions/sol d'UN véhicule selon sa boîte + son échelle
