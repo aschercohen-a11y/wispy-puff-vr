@@ -770,6 +770,22 @@
     assetBase.path = grp;                                                                     // dispo dans l'éditeur
   }
 
+  // --- BLOC DE DALLAGE (procédural) : dalles béton comme le trottoir, à poser pour paver une place ---
+  {
+    function makePlazaTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+      x.fillStyle = '#c3bcaa'; x.fillRect(0, 0, 128, 128);                                    // béton clair (idem trottoir)
+      for (let gy = 0; gy < 128; gy += 32) for (let gx = 0; gx < 128; gx += 32) { const g = 185 + (Math.random() * 26 | 0); x.fillStyle = 'rgba(' + g + ',' + (g - 7) + ',' + (g - 20) + ',0.35)'; x.fillRect(gx + 3, gy + 3, 26, 26); }
+      x.strokeStyle = 'rgba(120,114,102,0.6)'; x.lineWidth = 5;                               // joints entre dalles
+      for (let i = 0; i <= 128; i += 32) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); }
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2); return t;
+    }
+    const grp = new THREE.Group();
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(2, 0.06, 2), new THREE.MeshStandardMaterial({ map: makePlazaTex(), roughness: 1, metalness: 0 }));
+    slab.position.y = 0.03; grp.add(slab);
+    assetBase.paving = grp;                                                                   // dispo dans l'éditeur
+  }
+
   // --- FONTAINE : modèle pierre (Meshy) + EAU ANIMÉE par-dessus (jet central + 4 cascades + ondulations) ---
   const _dropTex = (function () {
     const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d');
@@ -1270,6 +1286,7 @@
     tree:     { label: '🌳 Arbre',          s: 2.2 },
     barrier:  { label: '🚧 Barrière',       s: 1.0 },
     path:     { label: '🚪 Allée / entrée', s: 1.0 },
+    paving:   { label: '🧱 Dalle (sol)',     s: 1.0 },
     fountain: { label: '⛲ Fontaine',        s: 2.2 },
   };
   const _eray = new THREE.Raycaster(), _emouse = new THREE.Vector2(), _eplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _ehit = new THREE.Vector3();
