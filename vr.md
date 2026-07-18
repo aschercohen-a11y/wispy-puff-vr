@@ -177,7 +177,9 @@ Oculus/
 
 **Fait :** vol fantôme, cristaux, bulle+micro+éclatement, portail téléporteur, jardinage, papillons, herbe animée, 2 maisons, amanites qui dandinent, pipeline **photo→3D IA**.
 
-- 🛣️ **Route stylisée** (bloc dans `index.html` après les champignons) : chaussée `PlaneGeometry` bitume (texture canvas `makeAsphaltTex` + ligne pointillée via repeat) le long de l'axe X (`ROAD_LEN=28, ROAD_W=3, ROAD_Z=0`) + 2 trottoirs `BoxGeometry` pavés surélevés (`makeSideTex`, `SIDE_H=0.13`). Trottoirs = **plateformes marchables** via `walkPlatforms[]` {x0,x1,z0,z1,h} → le sol monte quand le perso est dans l'AABB (step-up). Choix user : **stylisé cartoon** (pas Meshy — une route droite se fait mieux en géométrie+texture procédurale).
+- 🛣️ **Route stylisée** (`ROAD={z,len:28,w:3,sideW,sideH}` + `onRoad(x,z)` déclarés tôt) : chaussée `PlaneGeometry` bitume (canvas `makeAsphaltTex` + pointillés via repeat) le long de X + 2 trottoirs `BoxGeometry` pavés surélevés = **plateformes marchables** (`walkPlatforms[]` → le sol monte dans l'AABB). Stylisé cartoon (pas Meshy — route droite = mieux en géométrie+texture procédurale).
+- 🧹 **Exclusion route** : `onRoad()` filtre l'herbe (retry de position, sinon scale 0) ET les spots de champignons (déplacés hors route). Rien ne pousse sur la chaussée.
+- 🚧 **Barrières à sauter** (`models/barrier.glb` Meshy 8Mo→97Ko, `barriers[]`) : 4 haies rouge/blanc en travers de la route (`x=-9,-3,3,9`), scale (1.6,0.5,1.6) + rotY π/2. Collision AABB : bloque au sol / saute par-dessus (`top≈0.45`) / trébuche si clippé en l'air (même logique chute que champignons). Source `barrier_src.glb` (gitignore).
 
 **En cours (à finir) :**
 - 🟡 **Carotte Meshy** plantée (`carrot_meshy.glb`, pos (7,6), scale 3.2, rotY π) — vérifier dans le casque : **taille / orientation porte**. Ajuster `s` et `rotation.y` dans `index.html`.
