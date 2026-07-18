@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ville — Tableau immeubles (test)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #bfe0f5; font-family: 'Trebuchet MS', sans-serif; }
+  #hud { position: fixed; top: 10px; left: 10px; z-index: 10; background: rgba(12,22,42,.9); color: #dff; padding: 10px 14px; border: 2px solid #6fd; border-radius: 12px; font-size: 13px; max-width: 250px; }
+  #hud h3 { margin: 0 0 6px; }
+  button { margin-top: 8px; width: 100%; padding: 8px; border: 0; border-radius: 7px; background: #36e0d0; color: #023; font-weight: bold; cursor: pointer; }
+  small { opacity: .85; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="hud">
+  <h3>🏙️ Tableau Ville (test)</h3>
+  <small>Immeubles procéduraux toon (façade texturée + reliefs 3D). Tableau séparé, le village n'est pas touché.</small>
+  <button id="regen">🔄 Regénérer la rue</button>
+  <small style="display:block;margin-top:6px;">Clic-glisser = tourner · molette = zoom</small>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from './vendor/controls/OrbitControls.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe0f5);
+scene.fog = new THREE.Fog(0xbfe0f5, 45, 90);              // brouillard doux qui cache le fond
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(-32, 6.5, 4);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+document.body.appendChild(renderer.domElement);
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+// éclairage cartoon : ambiance douce + soleil doux
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.15));
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.25); sun.position.set(-8, 14, 6); scene.add(sun);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(10, 3.5, 0); controls.enableDamping = true; controls.update();
+
+// --- gradient map TOON (3 paliers) → rendu lisse et net ---
+function toonGradient() {
+  const c = document.createElement('canvas'); c.width = 4; c.height = 1; const x = c.getContext('2d');
+  const shades = ['#8a8a8a', '#c4c4c4', '#ececec', '#ffffff'];
+  for (let i = 0; i < 4; i++) { x.fillStyle = shades[i]; x.fillRect(i, 0, 1, 1); }
+  const t = new THREE.CanvasTexture(c); t.minFilter = t.magFilter = THREE.NearestFilter; return t;
+}
+const GRAD = toonGradient();
+
+// --- ROUTE + trottoirs ---
+const ROAD_LEN = 90, ROAD_W = 8, SIDE_W = 4;
+{
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_LEN + 20, 80), new THREE.MeshToonMaterial({ color: 0x8fb56a, gradientMap: GRAD }));
+  ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02; scene.add(ground);
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_LEN, ROAD_W), new THREE.MeshToonMaterial({ color: 0x555a63, gradientMap: GRAD }));
+  road.rotation.x = -Math.PI / 2; road.position.y = 0.01; scene.add(road);
+  // ligne centrale pointillée
+  for (let x = -ROAD_LEN / 2 + 2; x < ROAD_LEN / 2; x += 3) {
+    const d = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.22), new THREE.MeshBasicMaterial({ color: 0xf2e7c4 }));
+    d.rotation.x = -Math.PI / 2; d.position.set(x, 0.02, 0); scene.add(d);
+  }
+  for (const s of [-1, 1]) {
+    const sw = new THREE.Mesh(new THREE.BoxGeometry(ROAD_LEN, 0.25, SIDE_W), new THREE.MeshToonMaterial({ color: 0xc3bcaa, gradientMap: GRAD }));
+    sw.position.set(0, 0.125, s * (ROAD_W / 2 + SIDE_W / 2)); scene.add(sw);
+  }
+}
+
+// --- TEXTURE de façade (fenêtres + briques + devanture) générée au canvas ---
+const WALL_COLORS = ['#d98d6a', '#e6c56b', '#7fb6a6', '#c98fb0', '#8fa8d8', '#b58b6a', '#9fbf7a', '#d97b6a'];
+const SHOP_COLORS = ['#c0442f', '#2f6fb0', '#2f8f5a', '#b07030', '#7a4fb0'];
+function facadeTexture(opts) {
+  const W = 256, H = 512, c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  x.fillStyle = opts.wall; x.fillRect(0, 0, W, H);
+  // briques légères
+  if (opts.brick) {
+    x.strokeStyle = 'rgba(0,0,0,0.10)'; x.lineWidth = 2;
+    for (let y = 0; y < H; y += 18) { x.beginPath(); x.moveTo(0, y); x.lineTo(W, y); x.stroke(); const off = ((y / 18) % 2) * 24; for (let bx = off; bx < W; bx += 48) { x.beginPath(); x.moveTo(bx, y); x.lineTo(bx, y + 18); x.stroke(); } }
+  }
+  // rangées de fenêtres (haut) — étage du sol réservé à la devanture
+  const cols = 3, floorH = 74, winW = 46, winH = 52, padX = (W - cols * winW) / (cols + 1);
+  for (let fy = H - 150; fy > 30; fy -= floorH) {
+    for (let cix = 0; cix < cols; cix++) {
+      const wx = padX + cix * (winW + padX), wy = fy - winH;
+      x.fillStyle = '#3a3f4a'; x.fillRect(wx - 3, wy - 3, winW + 6, winH + 6);            // cadre
+      const lit = Math.random() < 0.35;
+      x.fillStyle = lit ? '#ffdf8f' : '#bfe0ef'; x.fillRect(wx, wy, winW, winH);            // vitre
+      x.fillStyle = 'rgba(255,255,255,0.25)'; x.fillRect(wx, wy, winW, winH / 2);           // reflet
+      x.strokeStyle = '#2a2e36'; x.lineWidth = 3; x.beginPath(); x.moveTo(wx + winW / 2, wy); x.lineTo(wx + winW / 2, wy + winH); x.moveTo(wx, wy + winH / 2); x.lineTo(wx + winW, wy + winH / 2); x.stroke();
+    }
+  }
+  // DEVANTURE au rez-de-chaussée
+  x.fillStyle = opts.shop; x.fillRect(0, H - 150, W, 60);                                    // bandeau enseigne
+  x.fillStyle = '#f5f0e0'; x.font = 'bold 34px Trebuchet MS'; x.textAlign = 'center'; x.fillText(opts.name, W / 2, H - 108);
+  x.fillStyle = '#2a2e36'; x.fillRect(0, H - 90, W, 90);                                     // vitrine sombre
+  x.fillStyle = '#9fd8ef'; x.fillRect(14, H - 78, W - 120, 66);                              // grande vitre
+  x.fillStyle = '#6b4a2a'; x.fillRect(W - 92, H - 90, 78, 90);                               // porte
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+
+const SHOP_NAMES = ['CAFÉ', 'MARKET', 'PIZZA', 'BAKERY', 'TOYS', 'BOOKS', 'DINER', 'SHOP'];
+function makeBuilding(width, height, depth, seed) {
+  const wall = WALL_COLORS[seed % WALL_COLORS.length];
+  const opts = { wall, shop: SHOP_COLORS[seed % SHOP_COLORS.length], name: SHOP_NAMES[seed % SHOP_NAMES.length], brick: (seed % 3 === 0) };
+  const tex = facadeTexture(opts);
+  const grp = new THREE.Group();
+  const wallMat = new THREE.MeshToonMaterial({ color: 0xffffff, map: tex, gradientMap: GRAD });
+  const plainMat = new THREE.MeshToonMaterial({ color: new THREE.Color(wall).multiplyScalar(0.9), gradientMap: GRAD });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), [plainMat, plainMat, plainMat, plainMat, wallMat, wallMat]);
+  body.position.y = height / 2; grp.add(body);
+  // corniche de toit (relief 3D)
+  const cornice = new THREE.Mesh(new THREE.BoxGeometry(width + 0.4, 0.5, depth + 0.4), new THREE.MeshToonMaterial({ color: new THREE.Color(wall).multiplyScalar(0.7), gradientMap: GRAD }));
+  cornice.position.y = height + 0.2; grp.add(cornice);
+  // auvent au-dessus de la devanture (relief 3D)
+  const awning = new THREE.Mesh(new THREE.BoxGeometry(width * 0.9, 0.25, 1.1), new THREE.MeshToonMaterial({ color: SHOP_COLORS[seed % SHOP_COLORS.length], gradientMap: GRAD }));
+  awning.position.set(0, 2.3, depth / 2 + 0.4); awning.rotation.x = 0.25; grp.add(awning);
+  return grp;
+}
+
+let street = new THREE.Group(); scene.add(street);
+function buildStreet() {
+  scene.remove(street); street = new THREE.Group(); scene.add(street);
+  const rng = () => Math.random();
+  for (const side of [-1, 1]) {
+    let x = -ROAD_LEN / 2 + 3;
+    let i = side === -1 ? 0 : 100;
+    while (x < ROAD_LEN / 2 - 3) {
+      const w = 5 + rng() * 4, h = 6 + rng() * 12, d = 5 + rng() * 2;
+      const b = makeBuilding(w, h, d, i++);
+      b.position.set(x + w / 2, 0, side * (ROAD_W / 2 + SIDE_W + d / 2));
+      b.rotation.y = side === -1 ? 0 : Math.PI;                 // façade vers la rue
+      street.add(b);
+      x += w + 0.4;
+    }
+  }
+}
+buildStreet();
+document.getElementById('regen').onclick = buildStreet;
+
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>
