@@ -664,7 +664,9 @@
       const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
       x.fillStyle = '#565a63'; x.fillRect(0, 0, 128, 128);                        // bitume gris-bleu doux
       for (let i = 0; i < 500; i++) { const g = 70 + (Math.random() * 40 | 0); x.fillStyle = 'rgba(' + g + ',' + (g + 4) + ',' + (g + 12) + ',0.5)'; x.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
-      x.fillStyle = '#f2e7c4'; x.fillRect(26, 58, 76, 12);                         // dash central (répété = pointillés)
+      // ROUTE À 2 VOIES : lignes de bord blanches continues + ligne centrale pointillée
+      x.fillStyle = '#e9e4d2'; x.fillRect(0, 9, 128, 5); x.fillRect(0, 114, 128, 5);   // lignes de bord (le long de la route)
+      x.fillStyle = '#f2e7c4'; x.fillRect(24, 60, 80, 7);                          // ligne centrale pointillée (sépare les 2 voies)
       const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 4, 1); return t;
     }
     function makeSideTex() {
@@ -688,20 +690,11 @@
   // helper : poser un modèle importé avec sa base sur l'herbe (y=0)
   function groundOffset(obj) { return -new THREE.Box3().setFromObject(obj).min.y; }
 
-  // --- Barrières rouge/blanc à SAUTER, en travers de la route ---
+  // --- Barrières rouge/blanc : chargées comme BASE pour la palette éditeur (plus placées par défaut) ---
   new GLTFLoader().load('models/barrier.glb?v=1', function (gltf) {
     const base = gltf.scene;
     base.traverse(o => { if (o.isMesh) { const mats = Array.isArray(o.material) ? o.material : [o.material]; for (const mt of mats) if (mt) mt.side = THREE.DoubleSide; } });
-    assetBase.barrier = base;                          // pour l'éditeur
-    for (const bx of [-9, -3, 3, 9]) {                 // 4 haies le long de la route
-      const m = base.clone(true);
-      m.scale.setScalar(1.0);                           // proportions D'ORIGINE (pas de déformation)
-      m.rotation.y = Math.PI / 2;                       // en travers de la route (grand côté = axe Z)
-      m.position.set(bx, groundOffset(m), ROAD.z);
-      scene.add(m);
-      const bb = new THREE.Box3().setFromObject(m);
-      barriers.push({ x0: bb.min.x, x1: bb.max.x, z0: bb.min.z, z1: bb.max.z, top: bb.max.y * 0.9, mesh: m });
-    }
+    assetBase.barrier = base;                          // dispo dans l'éditeur (à poser toi-même)
   });
 
   // --- Arbres low-poly (Poly Pizza) plantés ---
