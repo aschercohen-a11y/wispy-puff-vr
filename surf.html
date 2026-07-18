@@ -1661,6 +1661,15 @@
     camera.lookAt(EDIT.tx, 0.5, EDIT.tz);
   }
 
+  // --- BOUTON PAUSE ---
+  let paused = false;
+  const btnPause = document.createElement('button');
+  btnPause.textContent = '⏸';
+  btnPause.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:55;width:52px;height:52px;border:none;border-radius:50%;background:rgba(20,20,40,0.6);color:#fff;font-size:24px;cursor:pointer;backdrop-filter:blur(4px);box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+  document.body.appendChild(btnPause);
+  btnPause.addEventListener('click', (e) => { e.stopPropagation(); paused = !paused; btnPause.textContent = paused ? '▶' : '⏸'; });
+  addEventListener('keydown', (e) => { if (e.code === 'KeyP' && !e.repeat) { paused = !paused; btnPause.textContent = paused ? '▶' : '⏸'; } });
+
   let prevFrameT = 0;
   renderer.setAnimationLoop((time) => {
     const dt = prevFrameT ? Math.min(0.05, (time - prevFrameT) / 1000) : 0.016; prevFrameT = time;
@@ -1671,6 +1680,7 @@
       renderer.render(scene, camera);
       return;
     }
+    if (paused) { renderer.render(scene, camera); return; }   // PAUSE : gèle le jeu, on continue juste à afficher
     if (presenting) {
       updateVR(time);
       if (GAME_ENABLED && typeof window.loop === 'function') window.loop(time);
