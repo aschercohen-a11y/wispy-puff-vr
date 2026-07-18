@@ -11,8 +11,10 @@
 
 **Où on en est (dernière session) :**
 - ✅ Jeu complet et jouable : vol fantôme 6DOF, cristaux, bulle au souffle (micro), jardinage, portail téléporteur, papillons, herbe animée, 2 maisons, champignons amanites qui dandinent.
-- ✅ **Grosse découverte** : je génère des modèles **3D texturés à partir d'une PHOTO**, moi-même, via l'IA **TripoSR** (voir §« Pouvoir clé »). Testé et validé sur la maison-carotte.
-- 🟡 **Dernier truc en cours** : la **maison-carotte IA** (`models/carrot_ai.glb`) vient d'être plantée à `(x=7, z=6)`, échelle 6, `rotation.y = Math.PI`. **À vérifier dans le casque** : taille OK ? porte orientée vers le centre ? couleurs à rendre plus vives ? → ajuster dans `index.html` (loader `carrot_ai.glb`).
+- ✅ **Nouvel outil photo→3D : Meshy.ai** — bien supérieur à TripoSR (net, PBR, pas « fondu »). Compte utilisateur `aschercohen`, ~120 crédits. Peut aussi **rigger + animer** des perso humanoïdes (marche, course…) → GLB animé lisible par three.js (`AnimationMixer`).
+- ✅ **Maison-carotte Meshy** (`models/carrot_meshy.glb`) plantée à `(x=7, z=6)`, échelle **3.2**, `rotation.y = Math.PI`. Remplace l'ancienne carotte TripoSR (`carrot_ai.glb`, obsolète). Superbe : feuillage net, cheminée brique, boîte aux lettres, fenêtres à carreaux, fleurs.
+- 🟡 **À vérifier dans le casque** : taille OK ? porte bien orientée vers le centre ? → ajuster `s` et `rotation.y` dans `index.html` (loader `carrot_meshy.glb`).
+- ⚠️ **LEÇON MESHY** : l'export brut fait **49 Mo / 1,4 M triangles** = injouable sur Quest. **Toujours optimiser** avant d'intégrer (voir §Pouvoir clé) → on descend à ~1 Mo / 12 k tris.
 
 **Comment reprendre :**
 1. Ouvrir le dossier `C:\Users\asche\Downloads\claude\Oculus`.
@@ -22,18 +24,29 @@
 
 ---
 
-## 🎨 LE POUVOIR CLÉ : photo → 3D texturée (par IA, de mon côté)
+## 🎨 LE POUVOIR CLÉ : photo → 3D texturée
 
-**On peut transformer n'importe quelle photo d'objet en modèle 3D texturé**, sans que l'utilisateur touche à son PC. Pipeline testé :
+**On transforme n'importe quelle photo (ou prompt texte) en modèle 3D texturé**, sans que l'utilisateur touche à son PC.
 
+### ⭐ Voie principale : Meshy.ai (le meilleur)
+- Site : **meshy.ai** — compte `aschercohen`, crédits limités (~120). « Génération rapide à partir d'une image » ou texte→3D.
+- Qualité **nettement supérieure à TripoSR** : géométrie propre, PBR, couleurs vives.
+- **Peut rigger + animer** un perso humanoïde (marche/course/danse) → export **GLB animé** (lu par three.js `AnimationMixer`). Une carotte/objet sans membres se rigge mal → réservé aux bipèdes.
+- L'utilisateur **télécharge le GLB** dans `models/`, je fais le reste. (API Meshy possible plus tard pour automatiser côté Claude — nécessite une clé.)
+
+**🚨 OBLIGATOIRE — optimiser avant d'intégrer** (l'export Meshy brut = ~49 Mo / 1,4 M tris, injouable sur Quest) :
 ```bash
-pip install gradio_client Pillow
+npx --yes @gltf-transform/cli optimize IN.glb OUT.glb \
+  --compress quantize --texture-compress webp --texture-size 2048 --simplify-error 0.004
+# → ~1 Mo / ~12 k tris. quantize+webp = lus NATIVEMENT par three.js (pas de décodeur).
 ```
+⚠️ **Ne PAS utiliser `--compress meshopt`** : ça exige `MeshoptDecoder` côté three.js (non branché) ET Blender ne sait pas le relire pour les previews. `quantize` (KHR_mesh_quantization) est le bon choix. `--simplify-error` : 0.004 = net (~12 k tris), 0.015 = plus léger (~4 k tris, un peu facetté).
+Régler l'échelle `s` dans `index.html` : modèle Meshy ≈ 1,9 u de haut → `s = 3.2` pour ~6 u.
 
-**Génération (image → GLB) — `dev/triposr.py` :**
-- Service : **`stabilityai/TripoSR`** (Hugging Face, gratuit, appelé via `gradio_client`).
-- Endpoints : `/preprocess` (image, remove_bg=True, fg_ratio=0.85) → image détourée ; puis `/generate` (image, marching_cubes_resolution=256) → `(obj, glb)`.
-- Sortie : GLB **texturé** (couleurs de la photo). Qualité : organique mais un peu « fondu » et couleurs douces.
+### Voie de secours : TripoSR (gratuit, sans compte) — `dev/triposr.py`
+- Service : **`stabilityai/TripoSR`** (Hugging Face, gratuit, via `gradio_client` — `pip install gradio_client Pillow`).
+- Endpoints : `/preprocess` (image, remove_bg=True, fg_ratio=0.85) → détourée ; `/generate` (image, marching_cubes_resolution=256) → `(obj, glb)`.
+- Sortie : GLB texturé mais **organique/« fondu »**, couleurs douces. À utiliser si plus de crédits Meshy.
 
 **Autres services testés :**
 - `stabilityai/stable-fast-3d` (SF3D) : meilleure qualité mais a renvoyé **AppError** (quota GPU anonyme) — réessayer plus tard, ou avec un token HF.
@@ -134,7 +147,8 @@ Oculus/
 │   ├── pp_tree.glb           (Poly Pizza CC0)
 │   ├── pp_cartoonhouse.glb   (Poly Pizza CC0 — chaumière)
 │   ├── carrothouse.glb       (Blender script — ANCIENNE carotte, non utilisée)
-│   └── carrot_ai.glb         (IA TripoSR — carotte PLANTÉE, texturée)
+│   ├── carrot_ai.glb         (IA TripoSR — obsolète, remplacée par Meshy)
+│   └── carrot_meshy.glb      (Meshy AI — carotte PLANTÉE, HD texturée, optimisée 961 Ko)
 ├── dev/                  ← scripts de fabrication (Blender + IA + vérif)  ← IMPORTANT, sauvegardés ici
 │   ├── triposr.py            (photo → GLB texturé via TripoSR)
 │   ├── sf3d.py               (alternative SF3D, quota-limité)
@@ -154,10 +168,11 @@ Oculus/
 **Fait :** vol fantôme, cristaux, bulle+micro+éclatement, portail téléporteur, jardinage, papillons, herbe animée, 2 maisons, amanites qui dandinent, pipeline **photo→3D IA**.
 
 **En cours (à finir) :**
-- 🟡 **Carotte IA** plantée — vérifier dans le casque : **taille / orientation porte / couleurs** (rendre plus vives ?). Loader dans `index.html` (`carrot_ai.glb`, pos (7,6), scale 6, rotY π).
+- 🟡 **Carotte Meshy** plantée (`carrot_meshy.glb`, pos (7,6), scale 3.2, rotY π) — vérifier dans le casque : **taille / orientation porte**. Ajuster `s` et `rotation.y` dans `index.html`.
 
 **Idées / suite :**
-- 🎨 Booster la saturation de la carotte IA · relancer une gen plus nette (ou SF3D avec token)
+- 🚶 **Perso animé Meshy** : générer un habitant du jardin (lutin/animal humanoïde), le rigger+animer (marche) sur Meshy, l'importer et gérer sa trajectoire dans `index.html` (`AnimationMixer` déjà prévu).
+- 🥕 Générer d'autres bâtiments/objets Meshy depuis photos (mêmes réglages d'optimisation)
 - 🐦 oiseaux qui planent · 🐝 abeilles · 🎵 musique d'ambiance · 💧 étang/ruisseau · 🌅 cycle jour/nuit
 - 🎯 niveaux, chrono, score de survie de la bulle · ✨ plus de particules (collecte/plantation)
 - 🔧 réparer le WebGL du PC (redémarrage + pilote AMD) pour la preview PC
