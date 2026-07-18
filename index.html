@@ -112,8 +112,8 @@
   const hero = new THREE.Group();
   const heroMesh = new THREE.Group();      // partie visuelle séparée de la physique
   hero.add(heroMesh);
-  hero.position.set(0, 0, 2);
-  hero.rotation.y = Math.PI;                 // regarde vers le centre du jardin
+  hero.position.set(-11, 0, 0);              // départ au bout de la route
+  hero.rotation.y = Math.PI / 2;             // face à la route (le long de +X)
   scene.add(hero);
 
   const HERO_HEIGHT = 0.55;                  // taille cible du perso (unités monde)
@@ -193,7 +193,7 @@
   function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
 
   // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
-  let camYaw = Math.PI, camPitch = 0.42;      // PC : vue derrière le perso (ajustable à la souris)
+  let camYaw = Math.PI / 2 + Math.PI, camPitch = 0.42;   // caméra derrière le perso (qui regarde +X / la route)
   const CAM_DIST = 6.4;
   const _camTarget = new THREE.Vector3(), _hv = new THREE.Vector3();
   function updateFollowCam() {
@@ -1036,23 +1036,22 @@
       const aim = (Math.hypot(rx, ry) > 0.5) ? { x: rx, y: ry } : null;
       if (window.__vrInput) window.__vrInput(mv, aim, blow);
     } else {
-      // PERSO AU SOL (3e pers.) : stick gauche = marche (relative à la caméra), A/B = saut, stick droit = tourne la caméra
+      // PERSO type RUNNER : caméra DERRIÈRE, stick gauche = avancer/reculer + STRAFE gauche/droite
+      // (le perso NE TOURNE PAS en strafant — il se décale). Stick droit G/D = pivoter le perso (la caméra suit derrière).
       if (GAME_ENABLED && window.__vrInput) window.__vrInput(null, null, false);
-      const fwdX = -Math.sin(camYaw), fwdZ = -Math.cos(camYaw);   // avant = s'éloigner de la caméra
-      const rgtX = -fwdZ, rgtZ = fwdX;
+      const face = hero.rotation.y;                                // orientation du perso (change seulement au stick droit)
+      const fwdX = Math.sin(face), fwdZ = Math.cos(face);          // avant du perso
+      const rgtX = Math.cos(face), rgtZ = -Math.sin(face);         // droite du perso
       heroMoving = Math.hypot(lx, ly) > 0.15 && heroFallT <= 0;    // bloqué pendant la chute
       if (heroMoving) {
-        let dx = fwdX * (-ly) + rgtX * lx;
-        let dz = fwdZ * (-ly) + rgtZ * lx;
+        let dx = fwdX * (-ly) + rgtX * lx, dz = fwdZ * (-ly) + rgtZ * lx;
         const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
         hero.position.x += dx * HERO_SPEED * dt;
         hero.position.z += dz * HERO_SPEED * dt;
-        const tgt = Math.atan2(dx, dz);                            // oriente le perso
-        let d = tgt - hero.rotation.y;
-        while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
-        hero.rotation.y += d * Math.min(1, dt * 12);
       }
-      // (caméra auto derrière le perso — plus de rotation manuelle au stick droit)
+      const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;          // stick droit = pivote le perso (caméra suit derrière)
+      if (snap && !prevSnap) hero.rotation.y -= snap * Math.PI / 8;
+      prevSnap = snap;
     }
   }
 
