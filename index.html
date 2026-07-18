@@ -1097,7 +1097,7 @@
       if (_fwd.lengthSq() < 1e-4) _fwd.set(0, 0, -1);
       _fwd.normalize();
       _rightv.crossVectors(_fwd, _up).normalize();                // droite par rapport à ta vue
-      heroMoving = Math.hypot(lx, ly) > 0.15 && heroFallT <= 0 && heroDeadT <= 0;   // bloqué pendant chute/mort
+      heroMoving = Math.hypot(lx, ly) > 0.15 && heroFallT <= 0 && heroDeadT <= 0 && !heroCar;   // idle si porté par une voiture
       if (heroMoving) {
         hero.position.addScaledVector(_fwd, -ly * HERO_SPEED * dt);   // avant = où tu regardes
         hero.position.addScaledVector(_rightv, lx * HERO_SPEED * dt); // strafe G/D relatif à ta vue
@@ -1183,14 +1183,23 @@
     })();
   }
   function applyCarScale(s) { const go = () => { if (carBaseBox) setTrafficScale(s); else setTimeout(go, 400); }; go(); }   // attend le chargement de la voiture
-  // au démarrage : Supabase d'abord (partagé), sinon localStorage
+  function extractLayout(raw) {   // gère les 2 formats : tableau (ancien) OU {objects, carScale}
+    if (Array.isArray(raw)) return { objects: raw, carScale: null };
+    if (raw && typeof raw === 'object') return { objects: raw.objects || [], carScale: (raw.carScale != null ? raw.carScale : null) };
+    return { objects: [], carScale: null };
+  }
+  // au démarrage : Supabase (partagé) + localStorage, on prend le plus fourni (RÉCUPÉRATION si Supabase vidé)
   (async () => {
-    let raw = null;
-    try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); raw = j && j[0] && j[0].data; } } catch (e) {}
-    if (!raw) { try { raw = JSON.parse(localStorage.getItem('wispy_layout') || 'null'); } catch (e) {} }
-    let objects = raw, carScale = null;
-    if (raw && !Array.isArray(raw)) { objects = raw.objects; carScale = raw.carScale; }   // nouveau format {objects, carScale}
-    if (carScale) applyCarScale(carScale);
+    let sbRaw = null, lsRaw = null;
+    try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); sbRaw = j && j[0] && j[0].data; } } catch (e) {}
+    try { lsRaw = JSON.parse(localStorage.getItem('wispy_layout') || 'null'); } catch (e) {}
+    const S = extractLayout(sbRaw), L = extractLayout(lsRaw);
+    let objects = S.objects, carScale = S.carScale;
+    if (L.objects.length > S.objects.length) {          // localStorage plus riche → on restaure
+      objects = L.objects; if (L.carScale != null) carScale = L.carScale;
+      fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1', { method: 'PATCH', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ data: { objects, carScale: carScale != null ? carScale : trafficScale } }) }).catch(() => {});
+    }
+    if (carScale != null) applyCarScale(carScale);
     editApplyLayout(objects);
   })();
 
@@ -1302,7 +1311,7 @@
       let mx = joyX, my = joyY;
       if (kW) my -= 1; if (kS) my += 1; if (kA) mx -= 1; if (kD) mx += 1;   // clavier PC
       const mag = Math.hypot(mx, my);
-      heroMoving = mag > 0.05 && heroFallT <= 0 && heroDeadT <= 0;          // bloqué pendant chute/mort
+      heroMoving = mag > 0.05 && heroFallT <= 0 && heroDeadT <= 0 && !heroCar;   // idle si porté par une voiture
       if (heroMoving) {
         if (mag > 1) { mx /= mag; my /= mag; }
         const fwdX = -Math.sin(camYaw), fwdZ = -Math.cos(camYaw);   // avant = s'éloigner de la caméra
