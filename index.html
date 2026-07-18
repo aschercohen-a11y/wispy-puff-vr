@@ -961,7 +961,7 @@
   }
   // pose "pousser" des bras (delta appliqué par-dessus la pose de repos) — ajustable
   const ARM_POSE = { LeftArm: [0, 0, 1.25], RightArm: [0, 0, -1.25], LeftForeArm: [0, 0, 0.35], RightForeArm: [0, 0, -0.35] };
-  const STROLLER_DIST = 0.5, STROLLER_H = 0.5, STROLLER_YAW = Math.PI / 2;   // poignée côté femme (avant du modèle = -X)
+  const STROLLER_DIST = 0.28, STROLLER_H = 0.5, STROLLER_YAW = Math.PI / 2;   // poignée côté femme (avant du modèle = -X)
   function setStrollerScale(s) {   // taille de la poussette réglable dans l'éditeur
     strollerScale = Math.max(0.2, Math.min(3, s));
     for (const p of peds) if (p.stroller && p.strollerFit) { p.stroller.scale.setScalar(p.strollerFit * pedScale * strollerScale); p.stroller.updateMatrixWorld(true); p.stroller.userData.foot = -new THREE.Box3().setFromObject(p.stroller).min.y; }
