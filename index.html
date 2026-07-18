@@ -1036,18 +1036,16 @@
       const aim = (Math.hypot(rx, ry) > 0.5) ? { x: rx, y: ry } : null;
       if (window.__vrInput) window.__vrInput(mv, aim, blow);
     } else {
-      // PERSO type RUNNER : caméra DERRIÈRE, stick gauche = avancer/reculer + STRAFE gauche/droite
-      // (le perso NE TOURNE PAS en strafant — il se décale). Stick droit G/D = pivoter le perso (la caméra suit derrière).
+      // PERSO type RUNNER : STRAFE relatif à CE QUE TU REGARDES (casque) → gauche/droite toujours cohérent avec ta vue.
       if (GAME_ENABLED && window.__vrInput) window.__vrInput(null, null, false);
-      const face = hero.rotation.y;                                // orientation du perso (change seulement au stick droit)
-      const fwdX = Math.sin(face), fwdZ = Math.cos(face);          // avant du perso
-      const rgtX = Math.cos(face), rgtZ = -Math.sin(face);         // droite du perso
+      camera.getWorldDirection(_fwd); _fwd.y = 0;                  // direction du regard (casque), à plat
+      if (_fwd.lengthSq() < 1e-4) _fwd.set(0, 0, -1);
+      _fwd.normalize();
+      _rightv.crossVectors(_fwd, _up).normalize();                // droite par rapport à ta vue
       heroMoving = Math.hypot(lx, ly) > 0.15 && heroFallT <= 0;    // bloqué pendant la chute
       if (heroMoving) {
-        let dx = fwdX * (-ly) + rgtX * lx, dz = fwdZ * (-ly) + rgtZ * lx;
-        const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
-        hero.position.x += dx * HERO_SPEED * dt;
-        hero.position.z += dz * HERO_SPEED * dt;
+        hero.position.addScaledVector(_fwd, -ly * HERO_SPEED * dt);   // avant = où tu regardes
+        hero.position.addScaledVector(_rightv, lx * HERO_SPEED * dt); // strafe G/D relatif à ta vue
       }
       const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;          // stick droit = pivote le perso (caméra suit derrière)
       if (snap && !prevSnap) hero.rotation.y -= snap * Math.PI / 8;
