@@ -785,10 +785,10 @@
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.center.set(0.5, 0.5); return t;
   }
   // proportions calibrées (unités locales du modèle, centre = 0 ; hauteur ~1.11)
-  const FW = { BASIN_Y: -0.10, BASIN_IN: 0.34, BASIN_R: 0.72, BOWL_Y: 0.28, BOWL_R: 0.24, SPOUT_Y: 0.34, JT_R: 0.33, JT_Y: 0.31, LAND_R: 0.55 };
+  const FW = { BASIN_Y: -0.15, BASIN_IN: 0.34, BASIN_R: 0.72, BOWL_Y: 0.28, BOWL_R: 0.24, SPOUT_Y: 0.34, JT_R: 0.37, JT_Y: 0.42, LAND_R: 0.55 };
   function buildFountainWater(m, s) {
     const grp = new THREE.Group(); grp.name = 'WATER'; const jets = [], ripples = [];
-    const dropMat = new THREE.PointsMaterial({ map: _dropTex, size: 0.085 * s, transparent: true, depthWrite: false, opacity: 0.95, blending: THREE.AdditiveBlending, sizeAttenuation: true, color: 0xbfefff });
+    const dropMat = new THREE.PointsMaterial({ map: _dropTex, size: 0.09 * s, transparent: true, depthWrite: false, opacity: 0.95, blending: THREE.NormalBlending, sizeAttenuation: true, color: 0xcdeeff });
     // jet central (colonne bien fournie qui fane légèrement)
     const cN = 80, cPos = new Float32Array(cN * 3), cPh = new Float32Array(cN);
     for (let i = 0; i < cN; i++) cPh[i] = i / cN;
@@ -811,7 +811,7 @@
       { geo: new THREE.CircleGeometry(FW.BOWL_R, 28), Y: FW.BOWL_Y }
     ];
     for (const r of rings) {
-      const mat = new THREE.MeshBasicMaterial({ map: makeRippleTex(), transparent: true, opacity: 0.4, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ map: makeRippleTex(), transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide, color: 0xdff4ff });
       const d = new THREE.Mesh(r.geo, mat); d.rotation.x = -Math.PI / 2; d.position.y = r.Y + 0.008; grp.add(d);
       ripples.push(d);
     }
@@ -830,7 +830,7 @@
       }
       j.geo.attributes.position.needsUpdate = true;
     }
-    for (let i = 0; i < w.ripples.length; i++) { const mp = w.ripples[i].material.map; if (mp) { mp.offset.x = Math.sin(t * 0.3 + i) * 0.06; mp.offset.y = (t * 0.04 * (i + 1)) % 1; mp.rotation = t * 0.08 * (i ? -1 : 1); } w.ripples[i].material.opacity = 0.4 + 0.15 * Math.sin(t * 1.4 + i * 2); }
+    for (let i = 0; i < w.ripples.length; i++) { const mp = w.ripples[i].material.map; if (mp) { mp.offset.x = Math.sin(t * 0.3 + i) * 0.06; mp.offset.y = (t * 0.04 * (i + 1)) % 1; mp.rotation = t * 0.08 * (i ? -1 : 1); } w.ripples[i].material.opacity = 0.24 + 0.1 * Math.sin(t * 1.4 + i * 2); }
   }
   new GLTFLoader().load('models/fountain.glb?v=1', function (gltf) {
     const base = gltf.scene; base.traverse(o => { if (o.isMesh && o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
