@@ -1470,9 +1470,7 @@
     m.rotation.y = rotY || 0;
     m.position.set(x, 0, z); editGroundize(m);
     if (type === 'crosswalk') m.position.y = 0.014;      // pile posé sur la surface de la route (pas surélevé)
-    // SURF : route élargie (6→9) → on repousse la déco du trottoir de 1.5 vers l'extérieur (sinon elle est sur la route)
-    if (!GROUND_TYPES[type] && Math.abs(m.position.z) > 2.5) m.position.z += Math.sign(m.position.z) * 1.8;
-    scene.add(m);
+    scene.add(m);   // SURF : aucun décalage → déco affichée EXACTEMENT comme dans le village (alignée)
     const rec = { type, mesh: m, scale: s, blades: m.getObjectByName('BLADES') };   // pales à faire tourner
     if (type === 'fountain') rec.water = buildFountainWater(m, s);                   // eau animée par-dessus la fontaine
     EDIT.placed.push(rec);
