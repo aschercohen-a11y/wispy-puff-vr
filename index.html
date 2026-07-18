@@ -1411,7 +1411,7 @@
       }
       // ANIMATION : Fall (tombé) > Jump (en l'air) > Walking (bouge) > Idle (arrêt) — fondus doux
       if (heroMixer) {
-        const airborne = !heroOnGround, falling = heroFallT > 0 || heroDeadT > 0;
+        const airborne = !heroOnGround && !heroCar, falling = heroFallT > 0 || heroDeadT > 0;   // sur une voiture = considéré au sol
         if (airborne && !heroWasAir && jumpAction) jumpAction.reset();   // relance le saut au décollage
         heroWasAir = airborne;
         const fT = falling ? 1 : 0;
