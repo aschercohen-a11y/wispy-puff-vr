@@ -912,6 +912,59 @@
     sx.fillStyle = gr; sx.fillRect(0, 0, 64, 64);
     const smokeTex = new THREE.CanvasTexture(sc);
     for (let i = 0; i < 120; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0, depthWrite: false, color: 0xd0d4d8 })); s.visible = false; s.userData = { life: 0, vx: 0, vy: 0, vz: 0 }; scene.add(s); smoke.push(s); } }
+
+  // ============================================================
+  //  PIÉTON (kid Toy Story) : se balade sur le trottoir → marche vers un passage piéton →
+  //  TRAVERSE ; pendant la traversée les voitures s'arrêtent, puis repartent.
+  // ============================================================
+  const peds = [];
+  let crossBlock = { active: false, x: 0 };
+  const PED_SPEED = 1.5, PED_H = 0.62, PED_MODEL_YAW = 0;
+  const sideZ = (sgn) => ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);     // centre d'un trottoir
+  function nearestCrosswalkX(x) {                                          // x du passage piéton le plus proche (ou null)
+    let best = null, bd = 1e9;
+    for (const rec of EDIT.placed) if (rec.type === 'crosswalk') { const d = Math.abs(rec.mesh.position.x - x); if (d < bd) { bd = d; best = rec.mesh.position.x; } }
+    return best;
+  }
+  new GLTFLoader().load('models/kid.glb', function (gltf) {
+    const root = gltf.scene; root.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
+    const box0 = new THREE.Box3().setFromObject(root), h0 = (box0.max.y - box0.min.y) || 1, scl = PED_H / h0;
+    root.scale.setScalar(scl);
+    const clip = gltf.animations[0];
+    clip.tracks = clip.tracks.filter(t => !/Hips\.position$/.test(t.name));   // strip root-motion → marche sur place
+    const sgn = -1;
+    root.position.set(-8, 0, sideZ(sgn));
+    const box = new THREE.Box3().setFromObject(root); root.position.y = -box.min.y;   // pieds au sol
+    scene.add(root);
+    const mixer = new THREE.AnimationMixer(root); mixer.clipAction(clip).play();
+    peds.push({ mesh: root, mixer, side: sgn, dir: 1, state: 'walk', crossTimer: 5 + Math.random() * 5, crossX: 0, footY: root.position.y });
+  });
+  function updatePeds(dt) {
+    for (const p of peds) {
+      p.mixer.update(dt);
+      let vx = 0, vz = 0;
+      if (p.state === 'walk') {
+        vx = p.dir;
+        p.mesh.position.x += p.dir * PED_SPEED * dt;
+        if (p.mesh.position.x > 24) { p.mesh.position.x = 24; p.dir = -1; }
+        if (p.mesh.position.x < -16) { p.mesh.position.x = -16; p.dir = 1; }
+        p.crossTimer -= dt;
+        if (p.crossTimer <= 0) {
+          const cx = nearestCrosswalkX(p.mesh.position.x);
+          if (cx != null) { p.crossX = cx; p.state = 'goto'; p.dir = (cx > p.mesh.position.x) ? 1 : -1; }
+          else p.crossTimer = 3;                                         // aucun passage piéton posé → réessaie plus tard
+        }
+      } else if (p.state === 'goto') {                                   // rejoint le passage piéton sur le trottoir
+        vx = p.dir; p.mesh.position.x += p.dir * PED_SPEED * dt;
+        if (Math.abs(p.mesh.position.x - p.crossX) < 0.12) { p.mesh.position.x = p.crossX; p.state = 'cross'; crossBlock.active = true; crossBlock.x = p.crossX; }
+      } else {                                                           // cross : traverse la route
+        const targetZ = sideZ(-p.side), s = Math.sign(targetZ - p.mesh.position.z);
+        vz = s; p.mesh.position.z += s * PED_SPEED * dt;
+        if (Math.abs(targetZ - p.mesh.position.z) < 0.06) { p.mesh.position.z = targetZ; p.side = -p.side; p.state = 'walk'; p.dir = Math.random() < 0.5 ? 1 : -1; p.crossTimer = 6 + Math.random() * 6; crossBlock.active = false; }
+      }
+      if (vx || vz) p.mesh.rotation.y = Math.atan2(vx, vz) + PED_MODEL_YAW;   // face au déplacement
+    }
+  }
   let smokeIdx = 0, smokeT = 0;
 
   // --- Arbres low-poly (Poly Pizza) plantés ---
@@ -1635,9 +1688,11 @@
     //  TRAFIC : voitures foncent vers le joueur (-X). TOIT = plateforme (sauter dessus = OK). Côté/avant = MORT.
     // ============================================================
     {
+      updatePeds(dt);                                                            // piétons (marche + traversée)
       heroCar = null;
       for (const car of cars) {
-        car.mesh.position.x -= car.speed * dt;                                   // avance vers le joueur
+        const wait = crossBlock.active && car.mesh.position.x > crossBlock.x && (car.mesh.position.x - crossBlock.x) < 16;   // s'arrête pour laisser passer le piéton
+        if (!wait) car.mesh.position.x -= car.speed * dt;                        // avance vers le joueur
         if (car.mesh.position.x < hero.position.x - 14) { respawnCar(car); continue; }   // dépassé → réapparaît devant
         const dxc = hero.position.x - car.mesh.position.x, dzc = hero.position.z - car.mesh.position.z;
         if (Math.abs(dxc) < carHalfX + HERO_RADIUS && Math.abs(dzc) < carHalfZ + HERO_RADIUS) {   // dans l'empreinte
