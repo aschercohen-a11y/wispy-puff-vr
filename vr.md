@@ -13,7 +13,9 @@
 - ✅ Jeu complet et jouable : vol fantôme 6DOF, cristaux, bulle au souffle (micro), jardinage, portail téléporteur, papillons, herbe animée, 2 maisons, champignons amanites qui dandinent.
 - ✅ **Nouvel outil photo→3D : Meshy.ai** — bien supérieur à TripoSR (net, PBR, pas « fondu »). Compte utilisateur `aschercohen`, ~120 crédits. Peut aussi **rigger + animer** des perso humanoïdes (marche, course…) → GLB animé lisible par three.js (`AnimationMixer`).
 - ✅ **Maison-carotte Meshy** (`models/carrot_meshy.glb`) plantée à `(x=7, z=6)`, échelle **3.2**, `rotation.y = Math.PI`. Remplace l'ancienne carotte TripoSR (`carrot_ai.glb`, obsolète). **Validée en VR dans le casque = parfaite** ✅ (feuillage net, cheminée brique, boîte aux lettres, fenêtres à carreaux, fleurs).
-- ✅ **Contrôles PC/navigateur refaits** : OrbitControls remplacé par un **vol libre** (joystick souris bas-gauche + WASD/flèches, regard en glissant la souris, ⬆/⬇ ou Espace/Maj pour monter/descendre, F souffler, G planter). Le WebGL PC de l'utilisateur **remarche** (avant il était cassé, GPU AMD).
+- ✅ Le WebGL PC de l'utilisateur **remarche** (avant cassé, GPU AMD).
+- 🔄 **VIRAGE GAMEPLAY** : on abandonne le fantôme volant → **personnage jouable en 3e personne** (marche + saut + gravité + ramasse les diamants). Pour l'instant un **perso placeholder** (créature orange scriptée, `hero`/`heroMesh` dans `index.html`), caméra qui suit. Contrôles : PC joystick+WASD marche / souris = orbite caméra / Espace = saut ; mobile joystick+bouton saut ; VR stick = marche, A/B = saut. **À FAIRE : générer le vrai perso sur Meshy (style Crash Bandicoot, rig+anim marche/saut) → remplacer `hero` par le GLB + brancher `AnimationMixer`.** Prompt image prêt (voir historique). Le « bob » actuel n'est qu'un placeholder d'animation.
+- ℹ️ Bulle/portail/micro/jardinage **toujours présents** mais secondaires depuis le virage perso (à re-décider : garder ou retirer).
 - ⚠️ **LEÇON MESHY** : l'export brut fait **49 Mo / 1,4 M triangles** = injouable sur Quest. **Toujours optimiser** avant d'intégrer (voir §Pouvoir clé) → on descend à ~1 Mo / 12 k tris.
 
 **Comment reprendre :**
