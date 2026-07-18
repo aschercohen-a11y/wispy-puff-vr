@@ -1558,7 +1558,7 @@
   for (const k in EDIT_TYPES) {
     const b = document.createElement('button'); b.textContent = EDIT_TYPES[k].label; b.dataset.t = k;
     b.style.cssText = 'padding:5px 7px;border-radius:6px;border:1px solid #6fd;color:#dff;cursor:pointer;font-size:12px;';
-    b.onclick = () => { EDIT.type = k; edHighlight(); };
+    b.onclick = () => { EDIT.type = (EDIT.type === k) ? null : k; edHighlight(); };   // re-clic = DÉSACTIVE (mode sélection seule, plus de pose)
     edPal.appendChild(b);
   }
   edHighlight();
@@ -1645,7 +1645,8 @@
       if (e.button === 1 || EDIT.space || EDIT.handTool) { EDIT.pan = true; e.preventDefault(); return; }   // clic milieu / Espace / outil Main = déplacer la vue
       const pick = editPick(e);
       if (pick) { editSelect(pick); if (EDIT.rotMode) EDIT.rotDrag = true; else EDIT.drag = true; }   // clic objet = sélectionne, puis TOURNE (mode rotation) ou déplace
-      else { const g = editHitGround(e); if (g) { editSelect(editSpawn(EDIT.type, g.x, g.z, 0, null, true)); EDIT.drag = true; } }  // clic sol = pose
+      else if (EDIT.type) { const g = editHitGround(e); if (g) { editSelect(editSpawn(EDIT.type, g.x, g.z, 0, null, true)); EDIT.drag = true; } }  // clic sol = pose (seulement si un type est actif)
+      else { editSelect(null); }                                               // aucun type actif → clic sol = désélectionne (pas de pose)
     });
     dom.addEventListener('pointermove', (e) => {
       if (!EDIT.on) return;
