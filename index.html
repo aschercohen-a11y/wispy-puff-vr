@@ -116,7 +116,7 @@
   hero.rotation.y = Math.PI;                 // regarde vers le centre du jardin
   scene.add(hero);
 
-  const HERO_HEIGHT = 1.0;                   // taille cible du perso (unités monde)
+  const HERO_HEIGHT = 0.7;                   // taille cible du perso (unités monde)
   const MODEL_YAW = 0;                        // orientation du modèle (validé : on voit le dos en marche avant)
   let heroMixer = null, walkAction = null, runAction = null, heroReady = false;
   new GLTFLoader().load('models/character.glb?v=1', function (gltf) {
