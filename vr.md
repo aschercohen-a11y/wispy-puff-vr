@@ -177,6 +177,8 @@ Oculus/
 
 **Fait :** vol fantôme, cristaux, bulle+micro+éclatement, portail téléporteur, jardinage, papillons, herbe animée, 2 maisons, amanites qui dandinent, pipeline **photo→3D IA**.
 
+- 🛣️ **Route stylisée** (bloc dans `index.html` après les champignons) : chaussée `PlaneGeometry` bitume (texture canvas `makeAsphaltTex` + ligne pointillée via repeat) le long de l'axe X (`ROAD_LEN=28, ROAD_W=3, ROAD_Z=0`) + 2 trottoirs `BoxGeometry` pavés surélevés (`makeSideTex`, `SIDE_H=0.13`). Trottoirs = **plateformes marchables** via `walkPlatforms[]` {x0,x1,z0,z1,h} → le sol monte quand le perso est dans l'AABB (step-up). Choix user : **stylisé cartoon** (pas Meshy — une route droite se fait mieux en géométrie+texture procédurale).
+
 **En cours (à finir) :**
 - 🟡 **Carotte Meshy** plantée (`carrot_meshy.glb`, pos (7,6), scale 3.2, rotY π) — vérifier dans le casque : **taille / orientation porte**. Ajuster `s` et `rotation.y` dans `index.html`.
 
