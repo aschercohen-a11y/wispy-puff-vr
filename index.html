@@ -708,7 +708,7 @@
   // ============================================================
   const cars = [];
   const CAR_LANES = [-1.5, 1.5];                       // centres des 2 voies (route w=6)
-  const CAR_MODEL_YAW = Math.PI;                       // orientation du modèle pour regarder -X (vers le joueur) — à régler
+  const CAR_MODEL_YAW = 0;                             // le modèle regarde -X (avant vers le joueur) — plus de marche arrière
   let carGroundY = 0, carHalfX = 1, carHalfZ = 0.5, carTop = 1;
   function respawnCar(car, x) {
     car.lane = Math.random() < 0.5 ? 0 : 1;
