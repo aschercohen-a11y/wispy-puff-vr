@@ -187,7 +187,7 @@
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
-  const ROAD = { z: 0, len: 58, w: 3, sideW: 2.2, sideH: 0.22 };   // route CONTINUE d'un bout à l'autre du plateau (axe X)
+  const ROAD = { z: 0, len: 58, w: 6, sideW: 2.2, sideH: 0.22 };   // chaussée DOUBLÉE (w 3→6), trottoirs inchangés
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
   function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
@@ -734,6 +734,22 @@
     });
   });
 
+  // --- MOULIN ANIMÉ : tour + pales séparées (les pales tournent) ---
+  const HUB = { x: 0.0, y: 0.45, z: 0.72 };    // position des pales sur la tour (à régler au rendu)
+  const BLADE_SCALE = 1.0;                       // taille des pales
+  function dside(o) { o.traverse(x => { if (x.isMesh) { const m = Array.isArray(x.material) ? x.material : [x.material]; for (const mt of m) if (mt) mt.side = THREE.DoubleSide; } }); }
+  new GLTFLoader().load('models/windmill2.glb', function (gt) {
+    dside(gt.scene);
+    new GLTFLoader().load('models/windmill2_blades.glb', function (gb) {
+      dside(gb.scene);
+      const blades = gb.scene; blades.name = 'BLADES';
+      blades.position.set(HUB.x, HUB.y, HUB.z); blades.scale.setScalar(BLADE_SCALE);
+      const grp = new THREE.Group();
+      grp.add(gt.scene); grp.add(blades);
+      assetBase.windmill2 = grp;
+    });
+  });
+
   // ============================================================
   //  JEU étape 2 : la BULLE irisée à souffler jusqu'au PORTAIL
   //  (DÉSACTIVÉE pour l'instant : BUBBLE_ON = false — code gardé pour plus tard)
@@ -1065,6 +1081,7 @@
     house2:   { label: '🏘️ Maison 2',       s: 2.8 },
     bakery:   { label: '🥐 Boulangerie',    s: 2.8 },
     windmill: { label: '🌬️ Moulin',         s: 2.8 },
+    windmill2:{ label: '🌀 Moulin animé',   s: 2.8 },
     lamp:     { label: '🏮 Lampadaire',      s: 1.6 },
     carrot:   { label: '🥕 Maison carotte', s: 3.2 },
     cottage:  { label: '🏠 Chaumière',      s: 2.2 },
@@ -1098,7 +1115,7 @@
     m.rotation.y = rotY || 0;
     m.position.set(x, 0, z); editGroundize(m);
     scene.add(m);
-    const rec = { type, mesh: m, scale: s };
+    const rec = { type, mesh: m, scale: s, blades: m.getObjectByName('BLADES') };   // pales à faire tourner
     EDIT.placed.push(rec);
     if (select) editSelect(rec);
     return rec;
@@ -1221,6 +1238,7 @@
   let prevFrameT = 0;
   renderer.setAnimationLoop((time) => {
     const dt = prevFrameT ? Math.min(0.05, (time - prevFrameT) / 1000) : 0.016; prevFrameT = time;
+    for (const rec of EDIT.placed) if (rec.blades) rec.blades.rotation.z += dt * 1.2;   // pales des moulins tournent
     if (EDIT.on && !presenting) {                     // MODE ÉDITEUR : jeu gelé, caméra libre
       updateEditorCam();
       if (grassWind) grassWind.value = time * 0.001;
