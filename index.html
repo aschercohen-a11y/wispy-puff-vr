@@ -938,7 +938,7 @@
   //  TRAVERSE ; pendant la traversée les voitures s'arrêtent, puis repartent.
   // ============================================================
   const peds = [];
-  let crossBlock = { active: false, x: 0, halfW: 2.5 }, pedScale = 1;
+  let crossBlock = { active: false, x: 0, halfW: 2.5 }, pedScale = 1, strollerScale = 1;
   const PED_SPEED = 1.5, PED_H = 0.62, PED_MODEL_YAW = 0;
   function pedGroundH(z) {   // hauteur du sol sous le piéton : chaussée / trottoir surélevé / herbe
     const az = Math.abs(z);
@@ -948,7 +948,7 @@
   }
   function setPedScale(s) {   // taille réglable dans l'éditeur (multiplie l'échelle de base)
     pedScale = Math.max(0.3, Math.min(3, s));
-    for (const p of peds) { p.mesh.scale.setScalar(p.fit * pedScale); p.mesh.position.y = 0; p.mesh.updateMatrixWorld(true); p.footOffset = -new THREE.Box3().setFromObject(p.mesh).min.y; if (p.stroller && p.strollerFit) { p.stroller.scale.setScalar(p.strollerFit * pedScale); p.stroller.updateMatrixWorld(true); p.stroller.userData.foot = -new THREE.Box3().setFromObject(p.stroller).min.y; } }
+    for (const p of peds) { p.mesh.scale.setScalar(p.fit * pedScale); p.mesh.position.y = 0; p.mesh.updateMatrixWorld(true); p.footOffset = -new THREE.Box3().setFromObject(p.mesh).min.y; if (p.stroller && p.strollerFit) { p.stroller.scale.setScalar(p.strollerFit * pedScale * strollerScale); p.stroller.updateMatrixWorld(true); p.stroller.userData.foot = -new THREE.Box3().setFromObject(p.stroller).min.y; } }
   }
   function applyPedScale(s) { const go = () => { if (peds.length) setPedScale(s); else setTimeout(go, 400); }; go(); }
   const sideZ = (sgn) => ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);     // centre d'un trottoir
@@ -961,7 +961,12 @@
   }
   // pose "pousser" des bras (delta appliqué par-dessus la pose de repos) — ajustable
   const ARM_POSE = { LeftArm: [0, 0, 1.25], RightArm: [0, 0, -1.25], LeftForeArm: [0, 0, 0.35], RightForeArm: [0, 0, -0.35] };
-  const STROLLER_DIST = 0.5, STROLLER_H = 0.6, STROLLER_YAW = Math.PI / 2;   // poignée côté femme (avant du modèle = -X)
+  const STROLLER_DIST = 0.5, STROLLER_H = 0.5, STROLLER_YAW = Math.PI / 2;   // poignée côté femme (avant du modèle = -X)
+  function setStrollerScale(s) {   // taille de la poussette réglable dans l'éditeur
+    strollerScale = Math.max(0.2, Math.min(3, s));
+    for (const p of peds) if (p.stroller && p.strollerFit) { p.stroller.scale.setScalar(p.strollerFit * pedScale * strollerScale); p.stroller.updateMatrixWorld(true); p.stroller.userData.foot = -new THREE.Box3().setFromObject(p.stroller).min.y; }
+  }
+  function applyStrollerScale(s) { const go = () => { let ok = false; for (const p of peds) if (p.stroller) ok = true; if (ok) setStrollerScale(s); else setTimeout(go, 400); }; go(); }
   const _q = new THREE.Quaternion(), _e = new THREE.Euler();
   function spawnPed(url, startX, startSide, opts) {
     opts = opts || {};
@@ -985,7 +990,7 @@
           const st = g2.scene; st.traverse(o => { if (o.isMesh) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
           st.updateMatrixWorld(true);
           const sb = new THREE.Box3().setFromObject(st), sh = (sb.max.y - sb.min.y) || 1; p.strollerFit = STROLLER_H / sh;
-          st.scale.setScalar(p.strollerFit * pedScale);
+          st.scale.setScalar(p.strollerFit * pedScale * strollerScale);
           st.updateMatrixWorld(true); const sb2 = new THREE.Box3().setFromObject(st); st.userData.foot = -sb2.min.y;
           scene.add(st); p.stroller = st;
         });
@@ -1482,7 +1487,7 @@
   function editSerialize() { return EDIT.placed.map(r => ({ type: r.type, x: +r.mesh.position.x.toFixed(2), z: +r.mesh.position.z.toFixed(2), rotY: +r.mesh.rotation.y.toFixed(3), scale: +r.scale.toFixed(3) })); }
   function editSave(opts) {
     const objects = editSerialize();
-    const data = { objects, carScale: trafficScale, pedScale: pedScale };   // + taille voitures + taille piéton
+    const data = { objects, carScale: trafficScale, pedScale: pedScale, strollerScale: strollerScale };   // + tailles voitures/piéton/poussette
     try { localStorage.setItem('wispy_layout', JSON.stringify(data)); } catch (e) {}
     // SÉCURITÉ : l'auto-sauvegarde n'écrase JAMAIS Supabase avec un layout VIDE (seul le bouton force le vide)
     if (objects.length > 0 || (opts && opts.force)) {
@@ -1504,8 +1509,8 @@
   function applyCarScale(s) { const go = () => { if (carBaseBox) setTrafficScale(s); else setTimeout(go, 400); }; go(); }   // attend le chargement de la voiture
   function extractLayout(raw) {   // gère les 2 formats : tableau (ancien) OU {objects, carScale, pedScale}
     if (Array.isArray(raw)) return { objects: raw, carScale: null, pedScale: null };
-    if (raw && typeof raw === 'object') return { objects: raw.objects || [], carScale: (raw.carScale != null ? raw.carScale : null), pedScale: (raw.pedScale != null ? raw.pedScale : null) };
-    return { objects: [], carScale: null, pedScale: null };
+    if (raw && typeof raw === 'object') return { objects: raw.objects || [], carScale: (raw.carScale != null ? raw.carScale : null), pedScale: (raw.pedScale != null ? raw.pedScale : null), strollerScale: (raw.strollerScale != null ? raw.strollerScale : null) };
+    return { objects: [], carScale: null, pedScale: null, strollerScale: null };
   }
   // au démarrage : Supabase (partagé) + localStorage, on prend le plus fourni (RÉCUPÉRATION si Supabase vidé)
   (async () => {
@@ -1513,20 +1518,21 @@
     try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); sbRaw = j && j[0] && j[0].data; } } catch (e) {}
     try { lsRaw = JSON.parse(localStorage.getItem('wispy_layout') || 'null'); } catch (e) {}
     const S = extractLayout(sbRaw), L = extractLayout(lsRaw);
-    let objects = S.objects, carScale = S.carScale, pedScl = S.pedScale;
+    let objects = S.objects, carScale = S.carScale, pedScl = S.pedScale, strScl = S.strollerScale;
     if (L.objects.length > S.objects.length) {          // localStorage plus riche → on restaure
-      objects = L.objects; if (L.carScale != null) carScale = L.carScale; if (L.pedScale != null) pedScl = L.pedScale;
-      fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1', { method: 'PATCH', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ data: { objects, carScale: carScale != null ? carScale : trafficScale, pedScale: pedScl != null ? pedScl : pedScale } }) }).catch(() => {});
+      objects = L.objects; if (L.carScale != null) carScale = L.carScale; if (L.pedScale != null) pedScl = L.pedScale; if (L.strollerScale != null) strScl = L.strollerScale;
+      fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1', { method: 'PATCH', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ data: { objects, carScale: carScale != null ? carScale : trafficScale, pedScale: pedScl != null ? pedScl : pedScale, strollerScale: strScl != null ? strScl : strollerScale } }) }).catch(() => {});
     }
     if (carScale != null) applyCarScale(carScale);
     if (pedScl != null) applyPedScale(pedScl);
+    if (strScl != null) applyStrollerScale(strScl);
     editApplyLayout(objects);
   })();
 
   // --- Interface éditeur ---
   const edPanel = document.createElement('div');
   edPanel.style.cssText = 'position:fixed;top:64px;left:12px;z-index:50;background:rgba(12,22,42,.92);border:2px solid #6fd;border-radius:12px;padding:10px;color:#dff;font:13px sans-serif;display:none;max-width:210px;';
-  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>Espace + glisser</b> = te déplacer (main) · <b>WASD</b> = déplacer aussi · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer.<br>Objet sélectionné : <b>◄ ►</b> = tourner (2 sens) · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edSave" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;border:0;background:#3fbf5a;color:#fff;font-weight:bold;cursor:pointer;font-size:14px;">💾 Sauvegarder</button><div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;">🚗 Taille voitures :<button id="edCarM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edCarP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">🧍 Taille piéton :<button id="edPedM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edPedP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
+  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>Espace + glisser</b> = te déplacer (main) · <b>WASD</b> = déplacer aussi · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer.<br>Objet sélectionné : <b>◄ ►</b> = tourner (2 sens) · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edSave" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;border:0;background:#3fbf5a;color:#fff;font-weight:bold;cursor:pointer;font-size:14px;">💾 Sauvegarder</button><div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;">🚗 Taille voitures :<button id="edCarM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edCarP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">🧍 Taille piéton :<button id="edPedM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edPedP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:12px;">🚼 Taille poussette :<button id="edStrM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edStrP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
   document.body.appendChild(edPanel);
   const edPal = edPanel.querySelector('#edPal');
   function edHighlight() { [...edPal.children].forEach(c => c.style.background = c.dataset.t === EDIT.type ? '#36e0d0' : 'rgba(50,80,120,.5)'); }
@@ -1545,6 +1551,8 @@
   edPanel.querySelector('#edCarP').onclick = () => { setTrafficScale(Math.min(3.5, trafficScale * 1.1)); editSave(); };
   edPanel.querySelector('#edPedM').onclick = () => { setPedScale(pedScale * 0.9); editSave(); };
   edPanel.querySelector('#edPedP').onclick = () => { setPedScale(pedScale * 1.1); editSave(); };
+  edPanel.querySelector('#edStrM').onclick = () => { setStrollerScale(strollerScale * 0.9); editSave(); };
+  edPanel.querySelector('#edStrP').onclick = () => { setStrollerScale(strollerScale * 1.1); editSave(); };
   edPanel.querySelector('#edDel').onclick = () => editDelete();
   edPanel.querySelector('#edExport').onclick = () => { const s = JSON.stringify(editSerialize()); if (navigator.clipboard) navigator.clipboard.writeText(s); window.prompt('Placement (copié) :', s); };
 
