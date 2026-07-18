@@ -939,21 +939,41 @@
     const bb = new THREE.Box3().setFromObject(best.mesh);
     return { x: best.mesh.position.x, halfW: (bb.max.x - bb.min.x) / 2 };   // demi-largeur des bandes le long de la route
   }
-  new GLTFLoader().load('models/kid.glb', function (gltf) {
-    const root = gltf.scene; root.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
-    root.updateMatrixWorld(true);                                            // IMPORTANT : sinon la hauteur lue est minuscule → géant
-    const box0 = new THREE.Box3().setFromObject(root), h0 = (box0.max.y - box0.min.y) || 1, fit = PED_H / h0;
-    root.scale.setScalar(fit * pedScale);
-    const clip = gltf.animations[0];
-    clip.tracks = clip.tracks.filter(t => !/Hips\.position$/.test(t.name));   // strip root-motion → marche sur place
-    const sgn = -1;
-    root.position.set(-8, 0, sideZ(sgn)); root.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(root), footOffset = -box.min.y;   // décalage pour poser les pieds au sol
-    root.position.y = footOffset + ROAD.sideH;                                    // départ sur le trottoir surélevé
-    scene.add(root);
-    const mixer = new THREE.AnimationMixer(root); mixer.clipAction(clip).play();
-    peds.push({ mesh: root, mixer, side: sgn, dir: 1, state: 'walk', crossTimer: 5 + Math.random() * 5, crossX: 0, fit: fit, footOffset: footOffset });
-  });
+  // pose "pousser" des bras (delta appliqué par-dessus la pose de repos) — ajustable
+  const ARM_POSE = { LeftArm: [0, 0, -1.25], RightArm: [0, 0, 1.25], LeftForeArm: [0, 0, -0.35], RightForeArm: [0, 0, 0.35] };
+  const STROLLER_DIST = 0.42, STROLLER_H = 0.5, STROLLER_YAW = 0;
+  const _q = new THREE.Quaternion(), _e = new THREE.Euler();
+  function spawnPed(url, startX, startSide, opts) {
+    opts = opts || {};
+    new GLTFLoader().load(url, function (gltf) {
+      const root = gltf.scene; root.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
+      root.updateMatrixWorld(true);                                          // IMPORTANT : sinon la hauteur lue est minuscule → géant
+      const box0 = new THREE.Box3().setFromObject(root), h0 = (box0.max.y - box0.min.y) || 1, fit = PED_H / h0;
+      root.scale.setScalar(fit * pedScale);
+      const clip = gltf.animations[0];
+      clip.tracks = clip.tracks.filter(t => !/Hips\.position$/.test(t.name)); // strip root-motion → marche sur place
+      root.position.set(startX, 0, sideZ(startSide)); root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(root), footOffset = -box.min.y;
+      root.position.y = footOffset + ROAD.sideH;                             // départ sur le trottoir surélevé
+      scene.add(root);
+      const mixer = new THREE.AnimationMixer(root); mixer.clipAction(clip).play();
+      const p = { mesh: root, mixer, side: startSide, dir: 1, state: 'walk', crossTimer: 4 + Math.random() * 6, crossX: 0, fit: fit, footOffset: footOffset };
+      if (opts.stroller) {                                                   // bras figés en "pousser" + poussette devant
+        p.armBones = [];
+        root.traverse(o => { if (o.isBone && ARM_POSE[o.name]) { const d = ARM_POSE[o.name]; p.armBones.push({ bone: o, bind: o.quaternion.clone(), delta: new THREE.Quaternion().setFromEuler(new THREE.Euler(d[0], d[1], d[2])) }); } });
+        new GLTFLoader().load('models/stroller.glb', function (g2) {
+          const st = g2.scene; st.traverse(o => { if (o.isMesh) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
+          st.updateMatrixWorld(true);
+          const sb = new THREE.Box3().setFromObject(st), sh = (sb.max.y - sb.min.y) || 1; st.scale.setScalar(STROLLER_H / sh);
+          st.updateMatrixWorld(true); const sb2 = new THREE.Box3().setFromObject(st); st.userData.foot = -sb2.min.y;
+          scene.add(st); p.stroller = st;
+        });
+      }
+      peds.push(p);
+    });
+  }
+  spawnPed('models/kid.glb', -8, -1, {});
+  spawnPed('models/woman.glb', 6, 1, { stroller: true });
   function updatePeds(dt) {
     for (const p of peds) {
       p.mixer.update(dt);
@@ -979,6 +999,12 @@
       }
       if (vx || vz) p.mesh.rotation.y = Math.atan2(vx, vz) + PED_MODEL_YAW;   // face au déplacement
       p.mesh.position.y = p.footOffset + pedGroundH(p.mesh.position.z);       // suit trottoir/route/herbe
+      if (p.armBones) for (const a of p.armBones) a.bone.quaternion.copy(a.bind).multiply(a.delta);   // bras figés sur la barre (après l'anim)
+      if (p.stroller) {                                                       // poussette devant, avance avec la femme
+        const rot = p.mesh.rotation.y, fx = Math.sin(rot), fz = Math.cos(rot);
+        p.stroller.position.set(p.mesh.position.x + fx * STROLLER_DIST, (p.stroller.userData.foot || 0) + pedGroundH(p.mesh.position.z), p.mesh.position.z + fz * STROLLER_DIST);
+        p.stroller.rotation.y = rot + STROLLER_YAW;
+      }
     }
   }
   let smokeIdx = 0, smokeT = 0;
