@@ -106,39 +106,39 @@
   scene.add(player);
 
   // ============================================================
-  //  PERSONNAGE JOUABLE (placeholder — sera remplacé par le GLB Meshy animé)
+  //  PERSONNAGE JOUABLE (GLB Meshy : riggé + animé Walking/Running)
   //  Dirigé au joystick : MARCHE + SAUT + ramasse les DIAMANTS. Caméra 3e personne.
   // ============================================================
   const hero = new THREE.Group();
-  const heroMesh = new THREE.Group();      // partie visuelle (bob de marche) séparée de la physique
-  {
-    const orange = new THREE.MeshStandardMaterial({ color: 0xff7a2e, roughness: 0.55 });
-    const cream  = new THREE.MeshStandardMaterial({ color: 0xffe0b0, roughness: 0.7 });
-    const white  = new THREE.MeshStandardMaterial({ color: 0xffffff });
-    const black  = new THREE.MeshStandardMaterial({ color: 0x14141c });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 24, 18), orange);
-    body.scale.set(1, 1.15, 1); body.position.y = 0.62; heroMesh.add(body);
-    const tummy = new THREE.Mesh(new THREE.SphereGeometry(0.33, 20, 16), cream);
-    tummy.scale.set(1, 1.05, 0.55); tummy.position.set(0, 0.55, 0.28); heroMesh.add(tummy);
-    for (const sx of [-0.17, 0.17]) {        // yeux
-      const e = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), white);
-      e.position.set(sx, 0.9, 0.4); e.scale.set(1, 1.25, 0.7); heroMesh.add(e);
-      const p = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), black);
-      p.position.set(sx, 0.9, 0.5); heroMesh.add(p);
-    }
-    for (const sx of [-0.26, 0.26]) {        // oreilles
-      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.36, 12), orange);
-      ear.position.set(sx, 1.16, 0); ear.rotation.z = sx > 0 ? -0.25 : 0.25; heroMesh.add(ear);
-    }
-    for (const sx of [-0.22, 0.22]) {        // pieds
-      const f = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), cream);
-      f.scale.set(1, 0.55, 1.4); f.position.set(sx, 0.12, 0.05); heroMesh.add(f);
-    }
-  }
+  const heroMesh = new THREE.Group();      // partie visuelle séparée de la physique
   hero.add(heroMesh);
   hero.position.set(0, 0, 2);
   hero.rotation.y = Math.PI;                 // regarde vers le centre du jardin
   scene.add(hero);
+
+  const HERO_HEIGHT = 1.5;                   // taille cible du perso (unités monde)
+  const MODEL_YAW = 0;                        // orientation du modèle (validé : on voit le dos en marche avant)
+  let heroMixer = null, walkAction = null, runAction = null, heroReady = false;
+  new GLTFLoader().load('models/character.glb?v=1', function (gltf) {
+    const m = gltf.scene;
+    let box = new THREE.Box3().setFromObject(m);
+    const size = new THREE.Vector3(); box.getSize(size);
+    m.scale.setScalar(HERO_HEIGHT / (size.y || 1));
+    box = new THREE.Box3().setFromObject(m);                 // recalcul après échelle
+    m.position.y -= box.min.y;                                // pieds au sol (y=0)
+    m.position.x -= (box.min.x + box.max.x) / 2;             // centré
+    m.position.z -= (box.min.z + box.max.z) / 2;
+    m.rotation.y = MODEL_YAW;
+    m.traverse(o => { if (o.isMesh) { o.frustumCulled = false; o.castShadow = false; } });
+    heroMesh.add(m);
+    heroMixer = new THREE.AnimationMixer(m);
+    const clips = gltf.animations || [];
+    const walk = clips.find(c => /walk/i.test(c.name)) || clips[0];
+    const run  = clips.find(c => /run/i.test(c.name));
+    if (walk) { walkAction = heroMixer.clipAction(walk); walkAction.play(); walkAction.timeScale = 0; }
+    if (run)  { runAction = heroMixer.clipAction(run); }
+    heroReady = true;
+  });
 
   // physique + réglages du perso
   let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
@@ -147,7 +147,7 @@
 
   // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
   let camYaw = Math.PI, camPitch = 0.42;
-  const CAM_DIST = 5.4;
+  const CAM_DIST = 6.4;
   const _camTarget = new THREE.Vector3(), _hv = new THREE.Vector3();
   function updateFollowCam() {
     _camTarget.set(hero.position.x, hero.position.y + 1.0, hero.position.z);
@@ -994,10 +994,11 @@
       if (hero.position.y <= 0) { hero.position.y = 0; heroVelY = 0; heroOnGround = true; }
       const hpr = Math.hypot(hero.position.x, hero.position.z);
       if (hpr > HERO_CLAMP) { hero.position.x *= HERO_CLAMP / hpr; hero.position.z *= HERO_CLAMP / hpr; }
-      // bob de marche (placeholder) — sera remplacé par l'anim du GLB Meshy
-      if (heroMoving && heroOnGround) heroWalk += dt * 12; else heroWalk *= 0.88;
-      heroMesh.position.y = Math.abs(Math.sin(heroWalk)) * 0.09;
-      heroMesh.rotation.z = Math.sin(heroWalk) * 0.05;
+      // ANIMATION du perso : Walking quand il bouge (au sol), figé sinon
+      if (heroMixer) {
+        if (walkAction) walkAction.timeScale = (heroMoving && heroOnGround) ? 1.3 : 0;
+        heroMixer.update(dt);
+      }
       if (!presenting) updateFollowCam();                          // caméra suit le perso (hors VR)
     }
     if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe

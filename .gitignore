@@ -1,6 +1,7 @@
 tools/
 *.log
 tasks/
-# Sources Meshy brutes (49 Mo) et previews de fabrication — on ne versionne que le .glb optimisé
+# Sources Meshy brutes (lourdes) et previews de fabrication — on ne versionne que le .glb optimisé
 models/Meshy_AI_*.glb
+models/character_src.glb
 preview_carrot_*.png
