@@ -145,6 +145,8 @@
     heroMesh.add(m);
     heroMixer = new THREE.AnimationMixer(m);
     const clips = gltf.animations || [];
+    // retire le ROOT MOTION (translations) : les anims jouent SUR PLACE, la physique gère le déplacement/saut
+    clips.forEach(c => { c.tracks = c.tracks.filter(t => !/\.position$/.test(t.name)); });
     const walk = clips.find(c => /walk/i.test(c.name)) || clips[0];
     const jump = clips.find(c => /obstacle/i.test(c.name)) || clips.find(c => /jump/i.test(c.name));
     const run  = clips.find(c => /run/i.test(c.name));
@@ -159,6 +161,7 @@
   // physique + réglages du perso
   let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
   const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 14;
+  const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
   function tryJump() { if (heroOnGround) { heroVelY = HERO_JUMP; heroOnGround = false; } }
 
   // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
@@ -1033,6 +1036,7 @@
         if (idleAction) idleAction.setEffectiveWeight(heroIdleW);
         heroMixer.update(dt);
       }
+      heroMesh.scale.setScalar(presenting ? VR_HERO_SCALE : 1);      // perso réduit en VR
       if (presenting) updateFollowRigVR(); else updateFollowCam();   // caméra suit le perso (VR = rig, PC = caméra)
     }
     if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe
