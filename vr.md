@@ -199,8 +199,53 @@ Oculus/
 
 ---
 
+## 📓 ÉTAT COMPLET — SESSION « RUNNER + VILLAGE + ÉDITEUR » (le plus à jour)
+
+> Le jeu a **pivoté** : ce n'est plus le fantôme volant, c'est un **runner 3e personne** — un **bandicoot** (style Crash) qui court dans une **rue de village** (maisons Meshy placées par l'utilisateur), saute des **barrières**, ramasse des diamants. Bulle/portail/micro **désactivés** (`BUBBLE_ON=false`).
+
+### 🎮 Concept & contrôles actuels
+- **Départ** : perso à `(-11,0,0)`, `rotation.y=π/2` (face à la route, le long de +X), caméra derrière (`camYaw = π/2+π`).
+- **Caméra TOUJOURS derrière le perso** (PC/mobile/VR) : dans la boucle, `camYaw` suit doucement `hero.rotation.y + π` (`dt*5`). Orbite manuelle souris/tactile **retirée** (la souris règle juste `camPitch`).
+- **VR = runner** : stick gauche = avancer/reculer + **STRAFE gauche/droite RELATIF AU REGARD** (`camera.getWorldDirection` + `cross(fwd,up)`) → gauche/droite cohérent même après demi-tour (fix inversion). Stick droit G/D = pivote le perso par crans (caméra suit). A/B = saut. Perso réduit **60%** en VR (`VR_HERO_SCALE=0.6`), rig à `VR_DIST=5`, **hauteur `VR_HEIGHT=1.1`** (légère plongée).
+- **PC** : joystick(bas-gauche)+WASD = marche (turn-to-face + caméra derrière), Espace/⤒ = saut, F souffler(off), molette n/a. **Mobile** : joystick + bouton saut.
+- **Rendu VR net** : `renderer.xr.setFramebufferScaleFactor(1.5)` (supersampling) + `setFoveation(0)` (pas de flou périphérique). Baisser à 1.3 si ça rame.
+
+### 🧍 Personnage (`models/character.glb`, 2048)
+- Bandicoot Meshy riggé, **6 anims** (idle=`Lower_Weapon_Look_Raise`, Walking, Running, Jump_Over_Obstacle_2, Back_Jump, falling_down), 26 os, 10 355 tris, ~2.5 Mo. Optim = `resize 2048` + `webp` (PAS optimize/simplify → casse le skin). Source `character_src.glb` (gitignore).
+- Auto-scale `HERO_HEIGHT=0.55`, pieds au sol, `MODEL_YAW=0`, **matériau DoubleSide** (normales inversées sinon transparent de dos). Machine à états fondus **fall>jump>walk>idle**.
+- **⚠️ ROOT MOTION** : au load, retirer `Hips.position` de toutes les anims SAUF `falling_down` où on **garde la composante Y** (le corps descend au sol) en figeant X/Z au repos (Hips repos ≈ 0.36/69.8/-11.3, valeurs en **cm**). Ne JAMAIS retirer les `.position` des autres os (tête se déforme).
+
+### 🛣️ Route + obstacles
+- `const ROAD = { z:0, len:28, w:3, sideW:2.2, sideH:0.22 }` + `onRoad(x,z)`. Chaussée `PlaneGeometry` bitume (canvas `makeAsphaltTex`, pointillés) + 2 **trottoirs `BoxGeometry` pavés surélevés = plateformes marchables** (`walkPlatforms[]` {x0,x1,z0,z1,h} → le sol monte dans l'AABB).
+- `onRoad()` **exclut herbe + champignons** de la chaussée.
+- **Barrières** (`models/barrier.glb`, `barriers[]`) : 4 à `x=-9,-3,3,9`, **proportions D'ORIGINE** (`scale.setScalar(1.0)`, rotY π/2 — ne PAS déformer). Collision AABB : bloque au sol / saute par-dessus / trébuche si clippé en l'air.
+- **Champignons** (`models/mushroom_meshy.glb`) = obstacles-plateformes + **ressort** au saut (squash du chapeau, base gardée au sol).
+
+### 🛠️ ÉDITEUR de placement (touche **E** / bouton 🛠️, PC souris)
+- **Palette** (`EDIT_TYPES`, `assetBase`) : 🏡Maison1, 🏘️Maison2, 🥐Boulangerie, 🌬️Moulin, 🏮Lampadaire, 🥕Carotte, 🏠Chaumière, 🍄Champignon, 🌳Arbre, 🚧Barrière. (carotte/chaumière/arbres **plus placés par défaut**, dispo palette.)
+- **Contrôles** : **WASD**=déplacer caméra · **molette**=zoom(2.5–80) · **clic-droit** glisser=orbite · glisser souris=hauteur de vue · clic sol=**poser** · clic objet=sélectionner · glisser=**déplacer** · **◄►**=tourner (2 sens) · **▲▼**=taille · **Suppr**/🗑️=effacer · 📋=exporter JSON.
+- **⚠️ Grounding** : `editGroundize(m)` met `position.y=0` PUIS `-bbox.min.y` (indépendant de la position actuelle) — sinon les objets **s'enfoncent** à chaque déplacement (double comptage). Utilisé au spawn/drag/reground.
+- Caméra éditeur = orbite (`updateEditorCam`), jeu gelé (`if (EDIT.on) {... return;}` en tête de boucle).
+
+### ☁️ Sync PC ↔ Casque (Supabase)
+- Table **DÉDIÉE** `wispy_layout` (1 ligne id=1, colonne jsonb `data`). NE PAS toucher aux tables de l'app.
+- API : `https://supabase-api.swipego.app` · **anon key fraîche** (dans `index.html`, trouvée dans `Appshootnbox.md` — les clés du CLAUDE.md global étaient périmées/401).
+- `editSave` → PATCH `wispy_layout?id=eq.1` + localStorage. Boot → GET Supabase (sinon localStorage) → `editApplyLayout` (retry tant que les GLB chargent).
+- SQL de création (Studio `supabase.swipego.app`) : `create table wispy_layout(id int pk default 1, data jsonb default '[]', updated_at timestamptz)` + `insert id=1` + RLS `enable` + policies select/insert/update `using(true)` + `notify pgrst,'reload schema'`. **Déjà exécuté** (read 200, write 204 OK).
+
+### 🏘️ Modèles Meshy du village (tous 2048, éditeur seulement)
+`house1.glb` (1.75Mo/16k) · `house2.glb` (955Ko/5.8k) · `house_bakery.glb` (2.7Mo/46k, **décimée Blender** `dev/decimate.py` car 1.5M tris fragmentés, simplify inefficace) · `windmill.glb` (1.65Mo/11k, **1 seul mesh → pales non animables**) · `lamp.glb` (1Mo/1k). Sources `*_src.glb` / `Meshy_AI_*` gitignore.
+
+### 💡 À faire / idées
+- Lampadaire : régler taille par défaut (`s=1.6`) selon ressenti. Autres déco rue (banc, fontaine, panneau).
+- Moulin qui tourne = besoin des **pales en modèle séparé** (Meshy) OU pales procédurales.
+- Brancher **Running** sur un sprint · chrono/score de course · musique.
+- Éventuel strafe aussi sur PC (actuellement turn-to-face).
+
+---
+
 ## 👥 Méthode de travail
-- **Utilisateur** : idées, direction artistique, **photos de référence**, tests casque.
+- **Utilisateur** : idées, direction artistique, **photos de référence**, **génère les modèles sur Meshy**, **place les objets** (éditeur), tests casque.
 - **Moi** : code three.js/WebXR, scripts Blender, **génération IA photo→3D**, déploiement, réglages.
 - **Règle magique** : une **photo** d'objet → je le transforme en **3D texturée** (IA) → je le **plante** dans le jardin.
 
