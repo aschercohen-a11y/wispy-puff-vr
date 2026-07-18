@@ -215,9 +215,12 @@
   let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
   const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 56;   // plateau doublé (route plus longue)
   // --- MODE SUBWAY SURFERS : auto-run + 3 voies ---
-  const LANES = [-2, 0, 2];                       // gauche / centre / droite (route w=6)
+  const LANES = [-3, 0, 3];                       // gauche / centre / droite (route w=9, bien espacées)
   let heroLane = 1, runSpeed = 7, laneCd = 0, runLat = 0;   // voie courante · vitesse d'avance · anti-répétition · axe latéral
   function setLane(d) { heroLane = Math.max(0, Math.min(2, heroLane + d)); }
+  let roadMesh = null, roadTex = null; const sideMeshes = [];   // sol infini (suit le perso, marquage qui défile)
+  const recycleDecor = [];                                      // décor posé à recycler en boucle (treadmill)
+  let decorSpan = 116, decorReady = false;
   const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
   const HERO_RADIUS = 0.28;                   // rayon de collision du perso
   let heroFallT = 0, heroFallVX = 0, heroFallVZ = 0;   // chute : timer + élan « de l'autre côté »
@@ -231,7 +234,7 @@
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
-  const ROAD = { z: 0, len: 110, w: 6, sideW: 3.2, sideH: 0.22 };   // route DOUBLÉE en longueur (58→110) ; chaussée w6 ; trottoirs 3.2
+  const ROAD = { z: 0, len: 110, w: 9, sideW: 3.2, sideH: 0.22 };   // route ÉLARGIE (w 6→9) pour 3 voies bien espacées ; longue 110 ; trottoirs 3.2
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
   function tryJump() {
@@ -503,10 +506,11 @@
     const grass = new THREE.InstancedMesh(bg, gm, COUNT);
     const d = new THREE.Object3D();
     grassOrig = new Array(COUNT); grassXZ = new Float32Array(COUNT * 2);
+    const onRoadZ = (z) => Math.abs(z - ROAD.z) <= ROAD.halfSpan;   // exclusion route par Z (route infinie qui suit le perso)
     for (let i = 0; i < COUNT; i++) {
       let px = 0, pz = 0, tries = 0;
-      do { const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * (GARDEN_R - 1); px = Math.cos(a) * r; pz = Math.sin(a) * r; tries++; } while (onRoad(px, pz) && tries < 8);
-      if (onRoad(px, pz)) { d.scale.setScalar(0); d.position.set(0, -5, 0); d.updateMatrix(); grass.setMatrixAt(i, d.matrix); grassOrig[i] = d.matrix.clone(); grassXZ[i * 2] = 0; grassXZ[i * 2 + 1] = 0; continue; }   // rien sur la route
+      do { const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * (GARDEN_R - 1); px = Math.cos(a) * r; pz = Math.sin(a) * r; tries++; } while (onRoadZ(pz) && tries < 8);
+      if (onRoadZ(pz)) { d.scale.setScalar(0); d.position.set(0, -5, 0); d.updateMatrix(); grass.setMatrixAt(i, d.matrix); grassOrig[i] = d.matrix.clone(); grassXZ[i * 2] = 0; grassXZ[i * 2 + 1] = 0; continue; }   // rien sur la route
       d.position.set(px, 0, pz);
       d.rotation.set((Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.3);
       d.scale.setScalar(0.7 + Math.random() * 0.8);
@@ -684,7 +688,7 @@
     base.traverse(function (o) {
       if (o.isMesh && o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) { mt.metalness = 0.25; mt.roughness = 0.35; mt.emissive = new THREE.Color(0x4a3200); mt.emissiveIntensity = 0.35; mt.side = THREE.DoubleSide; } }); }
     });
-    const S = 0.34, lanes = [-2, 0, 2], spots = [];         // 3 voies du runner
+    const S = 0.34, lanes = [-3, 0, 3], spots = [];         // 3 voies du runner
     let li = 0, seg = 0;
     for (let x = -50; x <= 52; x += 2.0) {
       const z = lanes[li % 3], phase = seg % 10;
@@ -753,13 +757,14 @@
       for (let i = 0; i <= 128; i += 32) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); }
       const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 1.5, 1); return t;
     }
-    const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.len, ROAD.w), new THREE.MeshStandardMaterial({ map: makeAsphaltTex(), roughness: 1, metalness: 0 }));
-    road.rotation.x = -Math.PI / 2; road.position.set(0, 0.012, ROAD.z); scene.add(road);   // juste au-dessus de l'herbe
+    roadTex = makeAsphaltTex();
+    roadMesh = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.len, ROAD.w), new THREE.MeshStandardMaterial({ map: roadTex, roughness: 1, metalness: 0 }));
+    roadMesh.rotation.x = -Math.PI / 2; roadMesh.position.set(0, 0.012, ROAD.z); scene.add(roadMesh);   // juste au-dessus de l'herbe
     const sideTex = makeSideTex();
     for (const sgn of [-1, 1]) {
       const zc = ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);
       const s = new THREE.Mesh(new THREE.BoxGeometry(ROAD.len, ROAD.sideH, ROAD.sideW), new THREE.MeshStandardMaterial({ map: sideTex, roughness: 1, metalness: 0 }));
-      s.position.set(0, ROAD.sideH / 2, zc); scene.add(s);
+      s.position.set(0, ROAD.sideH / 2, zc); scene.add(s); sideMeshes.push(s);
       walkPlatforms.push({ x0: -ROAD.len / 2, x1: ROAD.len / 2, z0: zc - ROAD.sideW / 2, z1: zc + ROAD.sideW / 2, h: ROAD.sideH });   // trottoir = plateforme montable
     }
   }
@@ -905,7 +910,7 @@
   //  TRAFIC : voitures qui FONCENT vers le joueur (à esquiver) — voie gauche/droite au hasard, collision = MORT
   // ============================================================
   const cars = [];                                     // trafic MIXTE (voitures + bus), chacun ses dimensions
-  const CAR_LANES = [-2, 0, 2];                        // 3 voies (gauche/centre/droite) — danger partout
+  const CAR_LANES = [-3, 0, 3];                        // 3 voies (gauche/centre/droite) — danger partout
   const CAR_MODEL_YAW = 0, BUS_MODEL_YAW = 0;          // les modèles regardent -X (avant vers le joueur)
   let carBaseBox = null, busBaseBox = null, trafficScale = 0.85, busScale = 1.1;
   function vehDims(v) {   // recalcule collisions/sol d'UN véhicule selon sa boîte + son échelle
@@ -1009,8 +1014,9 @@
       peds.push(p);
     });
   }
-  spawnPed('models/kid.glb', -8, -1, {});
-  spawnPed('models/woman.glb', 6, 1, { stroller: true });
+  // Piétons désactivés en mode runner (ils traverseraient loin derrière et bloqueraient les voitures)
+  // spawnPed('models/kid.glb', -8, -1, {});
+  // spawnPed('models/woman.glb', 6, 1, { stroller: true });
   function updatePeds(dt) {
     crossBlock.active = false;                             // recalculé chaque frame : actif si UN piéton traverse
     for (const p of peds) {
@@ -1502,12 +1508,24 @@
       else if (!duplicated) { duplicated = true; duplicateVillage(); }
     })();
   }
-  // TEST : recopie le village posé pour remplir la route allongée (clones décoratifs, PAS ajoutés à EDIT.placed → non sauvegardés)
+  // TREADMILL : pave le décor posé en tuiles répétées + les enregistre pour le recyclage infini (clones, non sauvegardés)
   function duplicateVillage() {
-    const SHIFT = 58, originals = EDIT.placed.slice();
-    for (const rec of originals) for (const dx of [-SHIFT, SHIFT]) {
-      const c = rec.mesh.clone(true); c.position.x = rec.mesh.position.x + dx; scene.add(c);
+    const originals = EDIT.placed.slice();
+    if (!originals.length) { decorReady = true; return; }
+    let minX = 1e9, maxX = -1e9;
+    for (const rec of originals) { minX = Math.min(minX, rec.mesh.position.x); maxX = Math.max(maxX, rec.mesh.position.x); }
+    decorSpan = Math.max(60, (maxX - minX) + 12);               // période d'une tuile de village
+    const TILES = 6;                                            // nombre de tuiles paves (couvre loin devant/derrière)
+    const total = TILES * decorSpan;
+    for (const rec of originals) {
+      for (let k = -1; k < TILES - 1; k++) {
+        const c = (k === 0) ? rec.mesh : rec.mesh.clone(true);  // k=0 = l'original, sinon clone
+        c.position.x = rec.mesh.position.x + k * decorSpan;
+        if (k !== 0) scene.add(c);
+        recycleDecor.push({ mesh: c, span: total });
+      }
     }
+    decorReady = true;
   }
   function applyCarScale(s) { const go = () => { if (carBaseBox) setTrafficScale(s); else setTimeout(go, 400); }; go(); }   // attend le chargement de la voiture
   function applyBusScale(s) { const go = () => { if (busBaseBox) setBusScale(s); else setTimeout(go, 400); }; go(); }       // attend le chargement du bus
@@ -1665,7 +1683,15 @@
       hero.position.z += (LANES[heroLane] - hero.position.z) * Math.min(1, dt * 14);   // glisse vers la voie
       hero.rotation.y = Math.PI / 2;                               // toujours face à la route (+X)
       heroMoving = !heroCar;                                       // anim course (sauf porté par un véhicule)
-      if (hero.position.x > 54) hero.position.x = -52;             // boucle (étape 3 = recyclage sans couture)
+      // ===== DÉFILEMENT INFINI (treadmill) : le sol suit le perso, le décor se recycle =====
+      const hx = hero.position.x;
+      if (roadMesh) { roadMesh.position.x = hx; if (roadTex) roadTex.offset.x = -hx / 4; }   // route infinie + marquage qui défile
+      for (const s of sideMeshes) s.position.x = hx;               // trottoirs suivent
+      if (grassMesh) grassMesh.position.x = hx;                    // herbe suit
+      if (decorReady) for (const it of recycleDecor) {             // décor posé : boucle sans fin
+        while (it.mesh.position.x < hx - 26) it.mesh.position.x += it.span;
+        while (it.mesh.position.x > hx + it.span - 26) it.mesh.position.x -= it.span;
+      }
     }
     // GRAVITÉ + SAUT du perso (commun PC/mobile/VR) + limite du jardin
     {
@@ -1676,8 +1702,7 @@
       let groundH = 0;                                                 // hauteur du sol (0, ou trottoir surélevé)
       for (const pf of walkPlatforms) if (hero.position.x >= pf.x0 && hero.position.x <= pf.x1 && hero.position.z >= pf.z0 && hero.position.z <= pf.z1) groundH = Math.max(groundH, pf.h);
       if (hero.position.y <= groundH) { hero.position.y = groundH; heroVelY = 0; heroOnGround = true; heroJumps = 0; }
-      const hpr = Math.hypot(hero.position.x, hero.position.z);
-      if (hpr > HERO_CLAMP) { hero.position.x *= HERO_CLAMP / hpr; hero.position.z *= HERO_CLAMP / hpr; }
+      // (mode runner : pas de clamp circulaire — le perso avance à l'infini, z limité aux 3 voies)
       // CHAMPIGNONS = obstacles-plateformes : on peut MONTER dessus, on ne peut pas les TRAVERSER ;
       // si on CLIPPE le côté en SAUTANT → on TRÉBUCHE et on tombe de l'autre côté.
       if (heroFallT <= 0) for (const o of mushroomObstacles) {
@@ -1834,8 +1859,13 @@
         refreshHUD();
       }
     }
-    // pièces d'or : rotation (flip) + flottement + COLLECTE (en sautant) → compteur "Or"
+    // pièces d'or : rotation (flip) + flottement + COLLECTE + RECYCLAGE infini → compteur "Or"
     for (const c of coins) {
+      if (c.position.x < hero.position.x - 30) {           // dépassée → réapparaît devant (boucle)
+        c.position.x += 104; c.userData.collected = false; c.userData.done = false; c.userData.pop = 0;
+        c.visible = true; c.scale.setScalar(c.userData.baseScale);
+        c.traverse(o => { if (o.isMesh && o.material) { o.material.opacity = 1; } });
+      }
       if (c.userData.done) continue;
       c.rotation.y += 0.06;
       if (!c.userData.collected) c.position.y = c.userData.baseY + Math.sin(time * 0.003 + c.position.x) * 0.1;
