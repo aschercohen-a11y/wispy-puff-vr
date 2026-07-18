@@ -150,7 +150,7 @@
   const hero = new THREE.Group();
   const heroMesh = new THREE.Group();      // partie visuelle séparée de la physique
   hero.add(heroMesh);
-  hero.position.set(-26, 0, 0);              // départ au TOUT DÉBUT de la route (bout -X)
+  hero.position.set(-52, 0, 0);              // départ au TOUT DÉBUT de la route (bout -X)
   hero.rotation.y = Math.PI / 2;             // face à la route (le long de +X)
   scene.add(hero);
 
@@ -213,7 +213,7 @@
 
   // physique + réglages du perso
   let heroVelY = 0, heroOnGround = true, heroWalk = 0, heroMoving = false;
-  const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 29;   // plateau agrandi
+  const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 56;   // plateau doublé (route plus longue)
   const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
   const HERO_RADIUS = 0.28;                   // rayon de collision du perso
   let heroFallT = 0, heroFallVX = 0, heroFallVZ = 0;   // chute : timer + élan « de l'autre côté »
@@ -227,7 +227,7 @@
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
-  const ROAD = { z: 0, len: 58, w: 6, sideW: 3.2, sideH: 0.22 };   // chaussée DOUBLÉE (w 3→6) ; trottoirs élargis 2.2→3.2 vers l'extérieur (bord route inchangé → maisons non décalées)
+  const ROAD = { z: 0, len: 110, w: 6, sideW: 3.2, sideH: 0.22 };   // route DOUBLÉE en longueur (58→110) ; chaussée w6 ; trottoirs 3.2
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
   function tryJump() {
@@ -460,7 +460,7 @@
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(28, 28);
     return t;
   }
-  const GARDEN_R = 30;                                            // rayon du jardin (plateau agrandi ×2)
+  const GARDEN_R = 58;                                            // rayon du jardin (plateau doublé pour la route allongée)
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(GARDEN_R, 64),
     new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 1, metalness: 0 })
@@ -495,7 +495,7 @@
       );
     };
 
-    const COUNT = 11000;                                // plateau ×2 → plus de brins pour garder la densité
+    const COUNT = 26000;                                // plateau doublé → plus de brins pour garder la densité
     const grass = new THREE.InstancedMesh(bg, gm, COUNT);
     const d = new THREE.Object3D();
     grassOrig = new Array(COUNT); grassXZ = new Float32Array(COUNT * 2);
@@ -682,7 +682,7 @@
     });
     const S = 0.34, lanes = [-1.5, 0, 1.5], spots = [];
     let li = 0;
-    for (let x = -20; x <= 26; x += 3.2) {                    // arcs de 3 pièces (monte→descend) le long du parcours
+    for (let x = -50; x <= 52; x += 3.4) {                    // arcs de 3 pièces (monte→descend) sur tout le parcours allongé
       const z = lanes[li % 3]; li++;
       spots.push({ x: x - 0.95, z: z, y: 1.6 });
       spots.push({ x: x,        z: z, y: 2.1 });
@@ -921,7 +921,7 @@
     const base = gltf.scene; dside(base);
     assetBase.car = base;                                // palette (pristine) → tu règles la taille toi-même
     carBaseBox = new THREE.Box3().setFromObject(base);   // bbox à l'échelle 1
-    for (let i = 0; i < 4; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); cars.push({ mesh: m }); }
+    for (let i = 0; i < 6; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); cars.push({ mesh: m }); }
     setTrafficScale(trafficScale);                       // taille initiale (0.85, ou celle chargée)
     for (let i = 0; i < cars.length; i++) respawnCar(cars[i], hero.position.x + 12 + i * 16);
   });
@@ -940,9 +940,10 @@
   const peds = [];
   let crossBlock = { active: false, x: 0, halfW: 2.5 }, pedScale = 1, strollerScale = 1;
   const PED_SPEED = 1.5, PED_H = 0.62, PED_MODEL_YAW = 0;
-  function pedGroundH(z) {   // hauteur du sol sous le piéton : chaussée / trottoir surélevé / herbe
-    const az = Math.abs(z);
-    if (az <= ROAD.w / 2) return 0.012;                       // sur la route
+  function pedGroundH(z) {   // hauteur du sol sous le piéton : chaussée / trottoir surélevé / herbe (transition douce à la bordure)
+    const az = Math.abs(z), edge = ROAD.w / 2, ramp = 0.55;   // bordure chaussée↔trottoir
+    if (az <= edge) return 0.012;                             // sur la route
+    if (az < edge + ramp) return 0.012 + (ROAD.sideH - 0.012) * (az - edge) / ramp;   // PENTE de la bordure (montée/descente douce)
     if (az <= ROAD.w / 2 + ROAD.sideW) return ROAD.sideH;     // sur le trottoir (surélevé)
     return 0;                                                 // herbe
   }
@@ -1007,8 +1008,8 @@
       if (p.state === 'walk') {
         vx = p.dir;
         p.mesh.position.x += p.dir * PED_SPEED * dt;
-        if (p.mesh.position.x > 24) { p.mesh.position.x = 24; p.dir = -1; }
-        if (p.mesh.position.x < -16) { p.mesh.position.x = -16; p.dir = 1; }
+        if (p.mesh.position.x > 52) { p.mesh.position.x = 52; p.dir = -1; }
+        if (p.mesh.position.x < -52) { p.mesh.position.x = -52; p.dir = 1; }
         p.crossTimer -= dt;
         if (p.crossTimer <= 0) {
           const cw = nearestCrosswalk(p.mesh.position.x);
@@ -1499,12 +1500,20 @@
   // charge un layout (retry tant que les modèles ne sont pas prêts) — ignore les anciennes voitures posées
   function editApplyLayout(layout) {
     if (!layout || !layout.length) return;
-    const done = layout.map(() => false);
+    const done = layout.map(() => false); let duplicated = false;
     (function attempt() {
       let all = true;
       layout.forEach((d, i) => { if (!done[i]) { if (d.type === 'car') { done[i] = true; return; } if (assetBase[d.type]) { editSpawn(d.type, d.x, d.z, d.rotY, d.scale, false); done[i] = true; } else all = false; } });
       if (!all) setTimeout(attempt, 700);
+      else if (!duplicated) { duplicated = true; duplicateVillage(); }
     })();
+  }
+  // TEST : recopie le village posé pour remplir la route allongée (clones décoratifs, PAS ajoutés à EDIT.placed → non sauvegardés)
+  function duplicateVillage() {
+    const SHIFT = 58, originals = EDIT.placed.slice();
+    for (const rec of originals) for (const dx of [-SHIFT, SHIFT]) {
+      const c = rec.mesh.clone(true); c.position.x = rec.mesh.position.x + dx; scene.add(c);
+    }
   }
   function applyCarScale(s) { const go = () => { if (carBaseBox) setTrafficScale(s); else setTimeout(go, 400); }; go(); }   // attend le chargement de la voiture
   function extractLayout(raw) {   // gère les 2 formats : tableau (ancien) OU {objects, carScale, pedScale}
@@ -1790,7 +1799,7 @@
       // ANTI-EMPILEMENT : jamais deux voitures collées dans la même voie
       for (const a of cars) for (const b of cars) { if (a !== b && a.lane === b.lane) { const gap = a.mesh.position.x - b.mesh.position.x; if (gap > 0 && gap < carMinGap) a.mesh.position.x = b.mesh.position.x + carMinGap; } }
       if (heroCar) hero.position.x -= heroCar.speed * dt;                         // porté par la voiture (elle glisse sous lui)
-      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-26, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
+      if (heroDeadT > 0) { heroDeadT -= dt; if (heroDeadT <= 0) { hero.position.set(-52, 0, 0); hero.rotation.y = Math.PI / 2; heroVelY = 0; heroFallT = 0; } }   // respawn au départ
       // FUMÉE d'échappement (particules douces qui sortent du pot, montent, s'étalent et s'effacent)
       smokeT += dt;
       if (smokeT > 0.02 && cars.length) {
