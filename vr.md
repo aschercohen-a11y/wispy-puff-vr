@@ -44,6 +44,8 @@
 - **Peut rigger + animer** un perso humanoïde (marche/course/danse) → export **GLB animé** (lu par three.js `AnimationMixer`). Une carotte/objet sans membres se rigge mal → réservé aux bipèdes.
 - L'utilisateur **télécharge le GLB** dans `models/`, je fais le reste. (API Meshy possible plus tard pour automatiser côté Claude — nécessite une clé.)
 
+**📐 Politique texture** : objets vus de PRÈS (perso, maisons) → **texture 2048** (WebP compresse bien, coût faible, bien plus net) ; petits props → 1024. La **géométrie** (tris) reste toujours allégée = c'est ça qui charge le Quest, pas la texture. (Cible = Quest ; si un jour PC-only, on peut garder le plein niveau Meshy.)
+
 **🚨 OBLIGATOIRE — optimiser avant d'intégrer** (l'export Meshy brut = ~49 Mo / 1,4 M tris, injouable sur Quest) :
 ```bash
 npx --yes @gltf-transform/cli optimize IN.glb OUT.glb \
