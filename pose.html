@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Atelier — Femme + Poussette</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: 'Trebuchet MS', sans-serif; background: #cfe4f2; }
+  #panel { position: fixed; top: 10px; left: 10px; z-index: 10; background: rgba(12,22,42,.92); color: #dff; padding: 12px 14px; border: 2px solid #6fd; border-radius: 12px; width: 270px; max-height: 94vh; overflow:auto; }
+  #panel h3 { margin: 0 0 8px; font-size: 15px; }
+  .row { margin: 7px 0; font-size: 12px; }
+  .row label { display: flex; justify-content: space-between; }
+  .row input[type=range] { width: 100%; }
+  .val { color: #ffd15c; font-weight: bold; }
+  button { width: 100%; padding: 9px; margin-top: 8px; border: 0; border-radius: 7px; background: #3fbf5a; color: #fff; font-weight: bold; cursor: pointer; font-size: 14px; }
+  textarea { width: 100%; height: 90px; margin-top: 8px; font-size: 11px; font-family: monospace; border-radius: 6px; border: 1px solid #6fd; background: #0b1526; color: #9fe; box-sizing: border-box; }
+  small { opacity: .8; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="panel">
+  <h3>🚼 Atelier femme + poussette</h3>
+  <small>Règle tout à la perfection, puis « Copier » et envoie-moi le texte.</small>
+  <div class="row"><label>Distance poussette <span class="val" id="vDist"></span></label><input type="range" id="dist" min="0" max="1" step="0.01"></div>
+  <div class="row"><label>Taille poussette <span class="val" id="vH"></span></label><input type="range" id="h" min="0.2" max="1.6" step="0.01"></div>
+  <div class="row"><label>Orientation poussette <span class="val" id="vYaw"></span>°</label><input type="range" id="yaw" min="-180" max="180" step="5"></div>
+  <div class="row"><label>Hauteur poussette (fin) <span class="val" id="vYoff"></span></label><input type="range" id="yoff" min="-0.2" max="0.3" step="0.01"></div>
+  <hr style="border-color:#345">
+  <div class="row"><label>Bras — avant/arrière <span class="val" id="vArmZ"></span></label><input type="range" id="armZ" min="0" max="2.2" step="0.02"></div>
+  <div class="row"><label>Bras — haut/bas <span class="val" id="vArmX"></span></label><input type="range" id="armX" min="-1" max="1" step="0.02"></div>
+  <div class="row"><label>Coudes (avant-bras) <span class="val" id="vForeZ"></span></label><input type="range" id="foreZ" min="-1" max="1" step="0.02"></div>
+  <div class="row"><label>Coudes — haut/bas <span class="val" id="vForeX"></span></label><input type="range" id="foreX" min="-1" max="1" step="0.02"></div>
+  <button id="copy">📋 Copier les réglages</button>
+  <textarea id="out" readonly></textarea>
+  <small>Clic-glisser = tourner · molette = zoom</small>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
+import { OrbitControls } from './vendor/controls/OrbitControls.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xcfe4f2);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.01, 100);
+camera.position.set(0.9, 0.7, 1.5);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x556677, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(2, 4, 2); scene.add(sun);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(4, 48), new THREE.MeshStandardMaterial({ color: 0xbfc8b0 }));
+ground.rotation.x = -Math.PI / 2; scene.add(ground);
+const grid = new THREE.GridHelper(4, 16, 0x8899aa, 0x99aabb); scene.add(grid);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.35, 0); controls.update();
+
+// paramètres réglables (valeurs de départ = celles du jeu)
+const P = { dist: 0.28, h: 0.5, yaw: 90, yoff: 0, armZ: 1.25, armX: 0, foreZ: 0.35, foreX: 0 };
+const PED_H = 0.62;
+
+let woman = null, mixer = null, armBones = [], stroller = null, strollerModelH = 1, strollerMinY = 0;
+
+new GLTFLoader().load('models/woman.glb', (gltf) => {
+  const root = gltf.scene; root.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(m => { if (m) m.side = THREE.DoubleSide; }); } });
+  root.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(root), hh = (b.max.y - b.min.y) || 1; root.scale.setScalar(PED_H / hh);
+  root.updateMatrixWorld(true); const b2 = new THREE.Box3().setFromObject(root); root.position.y = -b2.min.y;
+  const clip = gltf.animations[0]; clip.tracks = clip.tracks.filter(t => !/Hips\.position$/.test(t.name));
+  mixer = new THREE.AnimationMixer(root); mixer.clipAction(clip).play();
+  const names = ['LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm'];
+  root.traverse(o => { if (o.isBone && names.indexOf(o.name) >= 0) armBones.push({ name: o.name, bone: o, bind: o.quaternion.clone() }); });
+  scene.add(root); woman = root;
+});
+new GLTFLoader().load('models/stroller.glb', (gltf) => {
+  const st = gltf.scene; st.traverse(o => { if (o.isMesh) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(m => { if (m) m.side = THREE.DoubleSide; }); } });
+  st.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(st); strollerModelH = (b.max.y - b.min.y) || 1; strollerMinY = b.min.y;
+  scene.add(st); stroller = st;
+});
+
+const _e = new THREE.Euler(), _q = new THREE.Quaternion();
+function applyArms() {
+  for (const a of armBones) {
+    let x = 0, z = 0;
+    if (a.name === 'LeftArm') { z = P.armZ; x = P.armX; }
+    if (a.name === 'RightArm') { z = -P.armZ; x = P.armX; }
+    if (a.name === 'LeftForeArm') { z = P.foreZ; x = P.foreX; }
+    if (a.name === 'RightForeArm') { z = -P.foreZ; x = P.foreX; }
+    _q.setFromEuler(_e.set(x, 0, z));
+    a.bone.quaternion.copy(a.bind).multiply(_q);
+  }
+}
+let last = 0;
+renderer.setAnimationLoop((t) => {
+  const dt = last ? (t - last) / 1000 : 0.016; last = t;
+  if (mixer) mixer.update(dt);
+  if (woman && armBones.length) applyArms();
+  if (stroller) {
+    const scale = P.h / strollerModelH;                 // hauteur cible = P.h
+    stroller.scale.setScalar(scale);
+    const foot = -strollerMinY * scale;                 // pose le bas au sol
+    const rot = woman ? woman.rotation.y : 0;
+    const fx = Math.sin(rot), fz = Math.cos(rot);
+    stroller.position.set(fx * P.dist, foot + P.yoff, fz * P.dist);
+    stroller.rotation.y = rot + P.yaw * Math.PI / 180;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+});
+
+// UI
+const ids = ['dist', 'h', 'yaw', 'yoff', 'armZ', 'armX', 'foreZ', 'foreX'];
+const vids = { dist: 'vDist', h: 'vH', yaw: 'vYaw', yoff: 'vYoff', armZ: 'vArmZ', armX: 'vArmX', foreZ: 'vForeZ', foreX: 'vForeX' };
+for (const id of ids) {
+  const el = document.getElementById(id); el.value = P[id];
+  const upd = () => { P[id] = parseFloat(el.value); document.getElementById(vids[id]).textContent = (+el.value).toFixed(2); refreshOut(); };
+  el.addEventListener('input', upd); upd();
+}
+function refreshOut() {
+  document.getElementById('out').value =
+    'STROLLER_DIST=' + P.dist.toFixed(2) + '  STROLLER_H=' + P.h.toFixed(2) + '  STROLLER_YAW_deg=' + P.yaw + '  YOFF=' + P.yoff.toFixed(2) + '\n' +
+    'ARM: armZ=' + P.armZ.toFixed(2) + ' armX=' + P.armX.toFixed(2) + ' foreZ=' + P.foreZ.toFixed(2) + ' foreX=' + P.foreX.toFixed(2);
+}
+document.getElementById('copy').onclick = () => { const o = document.getElementById('out'); o.select(); try { navigator.clipboard.writeText(o.value); } catch (e) {} document.getElementById('copy').textContent = '✅ Copié ! Envoie-le-moi'; };
+</script>
+</body>
+</html>
