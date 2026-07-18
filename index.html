@@ -182,12 +182,12 @@
   const walkPlatforms = [];                   // {x0,x1,z0,z1,h} : surfaces surélevées marchables (trottoirs)
   const barriers = [];                        // barrières rouges/blanches à sauter (sur la route)
   const assetBase = {};                       // modèles de base pour l'ÉDITEUR (peuplé au chargement)
-  const EDIT = { on: false, type: 'carrot', sel: null, placed: [], drag: false, orbit: false,
+  const EDIT = { on: false, type: 'house1', sel: null, placed: [], drag: false, orbit: false,
                  yaw: Math.PI * 0.2, pitch: 0.85, dist: 16, tx: 0, tz: 0, lx: 0, ly: 0 };
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
-  const ROAD = { z: 0, len: 28, w: 3, sideW: 0.7, sideH: 0.13 };   // route le long de l'axe X
+  const ROAD = { z: 0, len: 28, w: 3, sideW: 1.3, sideH: 0.13 };   // route le long de l'axe X (trottoirs élargis)
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
   function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
@@ -708,19 +708,8 @@
     const base = gltf.scene;
     const off = groundOffset(base);                 // hauteur à remonter pour poser la base au sol
     treeBase = base; treeOffset = off;              // réutilisé pour le jardinage
-    assetBase.tree = base;                          // pour l'éditeur
-    const spots = [
-      { x: -6, z: 2, s: 2.4 }, { x: 5, z: 5, s: 2.0 }, { x: -3, z: 6.5, s: 2.6 },
-      { x: 7, z: -3, s: 2.2 }, { x: 2, z: 7.5, s: 1.9 }, { x: -8, z: -3.5, s: 2.3 }
-    ];
-    for (let i = 0; i < spots.length; i++) {
-      const t = base.clone(true);
-      t.scale.setScalar(spots[i].s);
-      t.position.set(spots[i].x, off * spots[i].s, spots[i].z);
-      t.rotation.y = i * 1.7;
-      scene.add(t);
-      obstacles.push({ pos: new THREE.Vector3(spots[i].x, 1.5, spots[i].z), r: 0.9 });
-    }
+    assetBase.tree = base;                          // dispo dans l'éditeur (mais plus placés par défaut)
+    // (arbres par défaut retirés — à reposer via l'éditeur si voulu)
   });
 
   // --- Maison storybook (Poly Pizza) ---
@@ -749,9 +738,21 @@
     obstacles.push({ pos: new THREE.Vector3(7, 1.4, 6), r: 2.5 });     // fait éclater la bulle
   });
 
+  // --- Maisons Meshy (chargées uniquement comme BASE pour la palette de l'éditeur) ---
+  ['house1', 'house2', 'bakery', 'windmill'].forEach(function (key) {
+    const file = key === 'bakery' ? 'house_bakery' : key;
+    new GLTFLoader().load('models/' + file + '.glb', function (gltf) {
+      const b = gltf.scene;
+      b.traverse(o => { if (o.isMesh) { const mats = Array.isArray(o.material) ? o.material : [o.material]; for (const mt of mats) if (mt) mt.side = THREE.DoubleSide; } });
+      assetBase[key] = b;
+    });
+  });
+
   // ============================================================
   //  JEU étape 2 : la BULLE irisée à souffler jusqu'au PORTAIL
+  //  (DÉSACTIVÉE pour l'instant : BUBBLE_ON = false — code gardé pour plus tard)
   // ============================================================
+  const BUBBLE_ON = false;
   const HOVER_Y = 1.4;                                    // la bulle flotte TOUJOURS à cette hauteur (ne tombe jamais)
   const BUBBLE_START = new THREE.Vector3(0, HOVER_Y, -1.5);
   const bubbleVel = new THREE.Vector3();
@@ -791,6 +792,7 @@
   );
   blowCone.rotation.x = -Math.PI / 2; blowCone.position.set(0, -0.05, -0.95); blowCone.visible = false;
   camera.add(blowCone);
+  if (!BUBBLE_ON) { bubble.visible = false; portal.visible = false; portalLabel.visible = false; }   // bulle désactivée
 
   // Éclatement de la bulle : gouttelettes irisées + son "pop"
   const drops = [];
@@ -1000,6 +1002,7 @@
   micBtn.addEventListener('click', enableMic);
   micBtn.addEventListener('touchstart', function (e) { enableMic(); e.preventDefault(); }, { passive: false });
   document.body.appendChild(micBtn); document.body.appendChild(micMeter); document.body.appendChild(micTxt);
+  if (!BUBBLE_ON) micBtn.style.display = 'none';         // bulle désactivée → pas de bouton micro
 
   // --- Pilotage de la boucle du jeu ---
   // Hors VR (desktop) : game.js pilote sa propre boucle via window.requestAnimationFrame → on ne touche à rien.
@@ -1077,6 +1080,10 @@
   //  Sauvegarde dans Supabase (partagé PC↔casque) + localStorage (secours). Table dédiée wispy_layout.
   // ============================================================
   const EDIT_TYPES = {
+    house1:   { label: '🏡 Maison 1',       s: 2.8 },
+    house2:   { label: '🏘️ Maison 2',       s: 2.8 },
+    bakery:   { label: '🥐 Boulangerie',    s: 2.8 },
+    windmill: { label: '🌬️ Moulin',         s: 2.8 },
     carrot:   { label: '🥕 Maison carotte', s: 3.2 },
     cottage:  { label: '🏠 Chaumière',      s: 2.2 },
     mushroom: { label: '🍄 Champignon',     s: 0.32 },
@@ -1369,6 +1376,7 @@
       }
     }
 
+    if (BUBBLE_ON) {
     // MICRO : mesure le niveau + détecte le souffle
     if (micReady && analyser) {
       analyser.getByteFrequencyData(micData);
@@ -1445,10 +1453,10 @@
     }
     portal.rotation.z += dt * 0.6;
     portal.scale.setScalar(1 + Math.sin(time * 0.004) * 0.05);
-    if (hudFlashUntil && time > hudFlashUntil) { hudFlashUntil = 0; updateHUD(hudBase); }
-
     // traînée de la bulle : fondu
     for (const tm of trail) { if (!tm.visible) continue; tm.material.opacity -= dt * 0.7; tm.scale.multiplyScalar(1 - dt * 0.4); if (tm.material.opacity <= 0) tm.visible = false; }
+    }
+    if (hudFlashUntil && time > hudFlashUntil) { hudFlashUntil = 0; updateHUD(hudBase); }
     // papillons : vol + battement d'ailes
     const bt = time * 0.001;
     for (const bf of butterflies) {
