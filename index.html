@@ -1516,11 +1516,13 @@
     })();
   }
   // TEST : recopie le village posé pour remplir la route allongée (clones décoratifs, PAS ajoutés à EDIT.placed → non sauvegardés)
+  const villageClones = [];                                        // les copies (masquées en mode éditeur)
   function duplicateVillage() {
     const SHIFT = 58, originals = EDIT.placed.slice();
     for (const rec of originals) for (const dx of [-SHIFT, SHIFT]) {
-      const c = rec.mesh.clone(true); c.position.x = rec.mesh.position.x + dx; scene.add(c);
+      const c = rec.mesh.clone(true); c.position.x = rec.mesh.position.x + dx; scene.add(c); villageClones.push(c);
     }
+    for (const c of villageClones) c.visible = !EDIT.on;           // cache les clones si on est déjà en éditeur
   }
   function applyCarScale(s) { const go = () => { if (carBaseBox) setTrafficScale(s); else setTimeout(go, 400); }; go(); }   // attend le chargement de la voiture
   function applyBusScale(s) { const go = () => { if (busBaseBox) setBusScale(s); else setTimeout(go, 400); }; go(); }       // attend le chargement du bus
@@ -1609,6 +1611,7 @@
     edPanel.style.display = EDIT.on ? 'block' : 'none';
     edBtn.style.background = EDIT.on ? '#36e0d0' : 'rgba(12,22,42,.85)';
     EDIT.sel = null; if (editRing) editRing.visible = false; EDIT.hold = {}; EDIT.drag = EDIT.orbit = EDIT.pan = false;
+    for (const c of villageClones) c.visible = !EDIT.on;           // ÉDITEUR : on ne voit QUE les originaux (clones masqués)
     if (EDIT.on && hero) { EDIT.tx = hero.position.x; EDIT.tz = hero.position.z; }   // centre la vue sur le perso
     if (!EDIT.on) editSave();
   }
