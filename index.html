@@ -182,8 +182,8 @@
   const walkPlatforms = [];                   // {x0,x1,z0,z1,h} : surfaces surélevées marchables (trottoirs)
   const barriers = [];                        // barrières rouges/blanches à sauter (sur la route)
   const assetBase = {};                       // modèles de base pour l'ÉDITEUR (peuplé au chargement)
-  const EDIT = { on: false, type: 'house1', sel: null, placed: [], drag: false, orbit: false,
-                 yaw: Math.PI * 0.2, pitch: 0.85, dist: 16, tx: 0, tz: 0, lx: 0, ly: 0 };
+  const EDIT = { on: false, type: 'house1', sel: null, placed: [], drag: false, orbit: false, pan: false,
+                 yaw: Math.PI * 0.2, pitch: 0.85, dist: 20, tx: 0, tz: 0, lx: 0, ly: 0, hold: {} };
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
@@ -1157,7 +1157,7 @@
   // --- Interface éditeur ---
   const edPanel = document.createElement('div');
   edPanel.style.cssText = 'position:fixed;top:64px;left:12px;z-index:50;background:rgba(12,22,42,.92);border:2px solid #6fd;border-radius:12px;padding:10px;color:#dff;font:13px sans-serif;display:none;max-width:210px;';
-  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>WASD</b> = déplacer la caméra · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer.<br>Objet sélectionné : <b>◄ ►</b> = tourner (2 sens) · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
+  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>WASD</b> (maintenir) = se déplacer vite · <b>clic-milieu</b> glisser = déplacer la vue · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer.<br>Objet sélectionné : <b>◄ ►</b> = tourner (2 sens) · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
   document.body.appendChild(edPanel);
   const edPal = edPanel.querySelector('#edPal');
   function edHighlight() { [...edPal.children].forEach(c => c.style.background = c.dataset.t === EDIT.type ? '#36e0d0' : 'rgba(50,80,120,.5)'); }
@@ -1179,19 +1179,15 @@
     EDIT.on = !EDIT.on;
     edPanel.style.display = EDIT.on ? 'block' : 'none';
     edBtn.style.background = EDIT.on ? '#36e0d0' : 'rgba(12,22,42,.85)';
-    EDIT.sel = null; if (editRing) editRing.visible = false;
+    EDIT.sel = null; if (editRing) editRing.visible = false; EDIT.hold = {}; EDIT.drag = EDIT.orbit = EDIT.pan = false;
     if (EDIT.on && hero) { EDIT.tx = hero.position.x; EDIT.tz = hero.position.z; }   // centre la vue sur le perso
     if (!EDIT.on) editSave();
   }
   addEventListener('keydown', (e) => {
     if (e.code === 'KeyE' && !e.repeat) { toggleEdit(); return; }
     if (!EDIT.on) return;
-    // PAN caméra : WASD (toujours)
-    const step = EDIT.dist * 0.06, fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw);
-    if (e.code === 'KeyW') { EDIT.tx -= fx * step; EDIT.tz -= fz * step; e.preventDefault(); return; }
-    if (e.code === 'KeyS') { EDIT.tx += fx * step; EDIT.tz += fz * step; e.preventDefault(); return; }
-    if (e.code === 'KeyA') { EDIT.tx -= fz * step; EDIT.tz += fx * step; e.preventDefault(); return; }
-    if (e.code === 'KeyD') { EDIT.tx += fz * step; EDIT.tz -= fx * step; e.preventDefault(); return; }
+    // PAN caméra : WASD MAINTENUS = déplacement continu (appliqué dans updateEditorCam)
+    if (e.code === 'KeyW' || e.code === 'KeyS' || e.code === 'KeyA' || e.code === 'KeyD') { EDIT.hold[e.code] = true; e.preventDefault(); return; }
     if (EDIT.sel) {   // objet sélectionné : flèches = TOURNER (G/D, les 2 sens) et TAILLE (H/B)
       if (e.code === 'ArrowLeft')  { EDIT.sel.mesh.rotation.y -= Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
       if (e.code === 'ArrowRight') { EDIT.sel.mesh.rotation.y += Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
@@ -1201,12 +1197,15 @@
       if (e.code === 'Equal' || e.code === 'NumpadAdd') { EDIT.sel.scale *= 1.1; editReground(EDIT.sel); editSave(); return; }
       if (e.code === 'Minus' || e.code === 'NumpadSubtract') { EDIT.sel.scale *= 0.9; editReground(EDIT.sel); editSave(); return; }
       if (e.code === 'Delete' || e.code === 'Backspace') { editDelete(); return; }
-    } else {          // rien de sélectionné : les flèches pannent aussi la caméra
-      if (e.code === 'ArrowUp')    { EDIT.tx -= fx * step; EDIT.tz -= fz * step; e.preventDefault(); }
-      else if (e.code === 'ArrowDown')  { EDIT.tx += fx * step; EDIT.tz += fz * step; e.preventDefault(); }
-      else if (e.code === 'ArrowLeft')  { EDIT.tx -= fz * step; EDIT.tz += fx * step; e.preventDefault(); }
-      else if (e.code === 'ArrowRight') { EDIT.tx += fz * step; EDIT.tz -= fx * step; e.preventDefault(); }
+    } else {          // rien de sélectionné : les flèches pannent aussi (maintenues = continu)
+      const map = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD' };
+      if (map[e.code]) { EDIT.hold[map[e.code]] = true; e.preventDefault(); }
     }
+  });
+  addEventListener('keyup', (e) => {   // relâche les touches de pan éditeur
+    const map = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD' };
+    if (EDIT.hold[e.code] !== undefined) EDIT.hold[e.code] = false;
+    if (map[e.code]) EDIT.hold[map[e.code]] = false;
   });
   // souris éditeur (sur le canvas)
   {
@@ -1216,6 +1215,7 @@
       if (!EDIT.on) return;
       EDIT.lx = e.clientX; EDIT.ly = e.clientY;
       if (e.button === 2) { EDIT.orbit = true; return; }                       // clic droit = tourner la vue
+      if (e.button === 1) { EDIT.pan = true; e.preventDefault(); return; }      // clic milieu = déplacer la vue (glisser)
       const pick = editPick(e);
       if (pick) { editSelect(pick); EDIT.drag = true; }                        // clic sur objet = sélectionne + déplace
       else { const g = editHitGround(e); if (g) { editSelect(editSpawn(EDIT.type, g.x, g.z, 0, null, true)); EDIT.drag = true; } }  // clic sol = pose
@@ -1223,13 +1223,20 @@
     dom.addEventListener('pointermove', (e) => {
       if (!EDIT.on) return;
       if (EDIT.orbit) { EDIT.yaw -= (e.clientX - EDIT.lx) * 0.006; EDIT.pitch = Math.max(0.25, Math.min(1.45, EDIT.pitch + (e.clientY - EDIT.ly) * 0.006)); EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
+      else if (EDIT.pan) { const dx = e.clientX - EDIT.lx, dy = e.clientY - EDIT.ly, s = EDIT.dist * 0.0024, fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw); EDIT.tx += (Math.cos(EDIT.yaw) * dx - fx * dy) * s; EDIT.tz += (-fx * dx - fz * dy) * s; EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
       else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); editSelect(EDIT.sel); } }
     });
-    const edUp = () => { if (EDIT.drag || EDIT.orbit) editSave(); EDIT.drag = false; EDIT.orbit = false; };
+    const edUp = () => { if (EDIT.drag || EDIT.orbit) editSave(); EDIT.drag = false; EDIT.orbit = false; EDIT.pan = false; };
     dom.addEventListener('pointerup', edUp); dom.addEventListener('pointercancel', edUp);
     dom.addEventListener('wheel', (e) => { if (!EDIT.on) return; EDIT.dist = Math.max(2.5, Math.min(80, EDIT.dist + Math.sign(e.deltaY) * Math.max(1.2, EDIT.dist * 0.12))); e.preventDefault(); }, { passive: false });
   }
-  function updateEditorCam() {
+  function updateEditorCam(dt) {
+    // PAN CONTINU (WASD/flèches maintenus) : rapide, proportionnel au zoom → traverse le plateau facilement
+    const sp = EDIT.dist * 1.6 * (dt || 0.016), fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw);
+    if (EDIT.hold.KeyW) { EDIT.tx -= fx * sp; EDIT.tz -= fz * sp; }
+    if (EDIT.hold.KeyS) { EDIT.tx += fx * sp; EDIT.tz += fz * sp; }
+    if (EDIT.hold.KeyA) { EDIT.tx -= fz * sp; EDIT.tz += fx * sp; }
+    if (EDIT.hold.KeyD) { EDIT.tx += fz * sp; EDIT.tz -= fx * sp; }
     const cd = EDIT.dist * Math.cos(EDIT.pitch);
     camera.position.set(EDIT.tx + Math.sin(EDIT.yaw) * cd, EDIT.dist * Math.sin(EDIT.pitch) + 1, EDIT.tz + Math.cos(EDIT.yaw) * cd);
     camera.lookAt(EDIT.tx, 0.5, EDIT.tz);
@@ -1240,7 +1247,7 @@
     const dt = prevFrameT ? Math.min(0.05, (time - prevFrameT) / 1000) : 0.016; prevFrameT = time;
     for (const rec of EDIT.placed) if (rec.blades) rec.blades.rotation.z += dt * 1.2;   // pales des moulins tournent
     if (EDIT.on && !presenting) {                     // MODE ÉDITEUR : jeu gelé, caméra libre
-      updateEditorCam();
+      updateEditorCam(dt);
       if (grassWind) grassWind.value = time * 0.001;
       renderer.render(scene, camera);
       return;
