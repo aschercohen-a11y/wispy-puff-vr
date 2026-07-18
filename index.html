@@ -116,7 +116,7 @@
   hero.rotation.y = Math.PI;                 // regarde vers le centre du jardin
   scene.add(hero);
 
-  const HERO_HEIGHT = 1.5;                   // taille cible du perso (unités monde)
+  const HERO_HEIGHT = 1.0;                   // taille cible du perso (unités monde)
   const MODEL_YAW = 0;                        // orientation du modèle (validé : on voit le dos en marche avant)
   let heroMixer = null, walkAction = null, runAction = null, heroReady = false;
   new GLTFLoader().load('models/character.glb?v=1', function (gltf) {
@@ -150,7 +150,7 @@
   const CAM_DIST = 6.4;
   const _camTarget = new THREE.Vector3(), _hv = new THREE.Vector3();
   function updateFollowCam() {
-    _camTarget.set(hero.position.x, hero.position.y + 1.0, hero.position.z);
+    _camTarget.set(hero.position.x, hero.position.y + 0.7, hero.position.z);
     const cd = CAM_DIST * Math.cos(camPitch);
     camera.position.set(
       _camTarget.x + Math.sin(camYaw) * cd,
@@ -1004,7 +1004,7 @@
     if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe
     for (const cl of clouds) { cl.userData.ang += cl.userData.spd * 0.0004; placeCloud(cl); } // dérive douce
     // cristaux : rotation + flottement + COLLECTE (par le PERSO)
-    _chest.set(hero.position.x, hero.position.y + 0.7, hero.position.z);   // corps du perso
+    _chest.set(hero.position.x, hero.position.y + 0.5, hero.position.z);   // corps du perso
     for (const c of crystals) {
       if (c.userData.done) continue;
       c.rotation.y += 0.01;
