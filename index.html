@@ -1166,10 +1166,15 @@
   function editReground(rec) { rec.mesh.scale.setScalar(rec.scale); editGroundize(rec.mesh); editSelect(rec); }
   function editDelete() { if (!EDIT.sel) return; scene.remove(EDIT.sel.mesh); EDIT.placed = EDIT.placed.filter(r => r !== EDIT.sel); EDIT.sel = null; if (editRing) editRing.visible = false; editSave(); }
   function editSerialize() { return EDIT.placed.map(r => ({ type: r.type, x: +r.mesh.position.x.toFixed(2), z: +r.mesh.position.z.toFixed(2), rotY: +r.mesh.rotation.y.toFixed(3), scale: +r.scale.toFixed(3) })); }
-  function editSave() {
-    const data = { objects: editSerialize(), carScale: trafficScale };   // + la taille des voitures du trafic
+  function editSave(opts) {
+    const objects = editSerialize();
+    const data = { objects, carScale: trafficScale };   // + la taille des voitures du trafic
     try { localStorage.setItem('wispy_layout', JSON.stringify(data)); } catch (e) {}
-    fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1', { method: 'PATCH', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ data }) }).catch(() => {});
+    // SÉCURITÉ : l'auto-sauvegarde n'écrase JAMAIS Supabase avec un layout VIDE (seul le bouton force le vide)
+    if (objects.length > 0 || (opts && opts.force)) {
+      return fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.1', { method: 'PATCH', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ data }) });
+    }
+    return Promise.resolve();
   }
 
   // charge un layout (retry tant que les modèles ne sont pas prêts) — ignore les anciennes voitures posées
@@ -1206,7 +1211,7 @@
   // --- Interface éditeur ---
   const edPanel = document.createElement('div');
   edPanel.style.cssText = 'position:fixed;top:64px;left:12px;z-index:50;background:rgba(12,22,42,.92);border:2px solid #6fd;border-radius:12px;padding:10px;color:#dff;font:13px sans-serif;display:none;max-width:210px;';
-  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>WASD</b> (maintenir) = se déplacer vite · <b>clic-milieu</b> glisser = déplacer la vue · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer.<br>Objet sélectionné : <b>◄ ►</b> = tourner (2 sens) · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;">🚗 Taille voitures :<button id="edCarM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edCarP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
+  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>Espace + glisser</b> = te déplacer (main) · <b>WASD</b> = déplacer aussi · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer.<br>Objet sélectionné : <b>◄ ►</b> = tourner (2 sens) · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edSave" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;border:0;background:#3fbf5a;color:#fff;font-weight:bold;cursor:pointer;font-size:14px;">💾 Sauvegarder</button><div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;">🚗 Taille voitures :<button id="edCarM" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">−</button><button id="edCarP" style="flex:1;padding:5px;border-radius:6px;border:1px solid #6fd;background:rgba(50,80,120,.5);color:#dff;cursor:pointer;font-size:15px;">+</button></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
   document.body.appendChild(edPanel);
   const edPal = edPanel.querySelector('#edPal');
   function edHighlight() { [...edPal.children].forEach(c => c.style.background = c.dataset.t === EDIT.type ? '#36e0d0' : 'rgba(50,80,120,.5)'); }
@@ -1217,6 +1222,10 @@
     edPal.appendChild(b);
   }
   edHighlight();
+  edPanel.querySelector('#edSave').onclick = () => {
+    const b = edPanel.querySelector('#edSave'), t0 = b.textContent; b.textContent = '⏳ Sauvegarde…'; b.disabled = true;
+    editSave({ force: true }).then((r) => { if (r && r.ok === false) throw 0; b.textContent = '✅ Sauvegardé !'; }).catch(() => { b.textContent = '⚠️ Échec, réessaie'; }).finally(() => { setTimeout(() => { b.textContent = t0; b.disabled = false; }, 1500); });
+  };
   edPanel.querySelector('#edCarM').onclick = () => { setTrafficScale(Math.max(0.3, trafficScale * 0.9)); editSave(); };
   edPanel.querySelector('#edCarP').onclick = () => { setTrafficScale(Math.min(3.5, trafficScale * 1.1)); editSave(); };
   edPanel.querySelector('#edDel').onclick = () => editDelete();
@@ -1239,6 +1248,7 @@
     if (!EDIT.on) return;
     // PAN caméra : WASD MAINTENUS = déplacement continu (appliqué dans updateEditorCam)
     if (e.code === 'KeyW' || e.code === 'KeyS' || e.code === 'KeyA' || e.code === 'KeyD') { EDIT.hold[e.code] = true; e.preventDefault(); return; }
+    if (e.code === 'Space') { EDIT.space = true; e.preventDefault(); return; }   // Espace maintenu = outil main (Photoshop)
     if (EDIT.sel) {   // objet sélectionné : flèches = TOURNER (G/D, les 2 sens) et TAILLE (H/B)
       if (e.code === 'ArrowLeft')  { EDIT.sel.mesh.rotation.y -= Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
       if (e.code === 'ArrowRight') { EDIT.sel.mesh.rotation.y += Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
@@ -1257,6 +1267,7 @@
     const map = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD' };
     if (EDIT.hold[e.code] !== undefined) EDIT.hold[e.code] = false;
     if (map[e.code]) EDIT.hold[map[e.code]] = false;
+    if (e.code === 'Space') EDIT.space = false;
   });
   // souris éditeur (sur le canvas)
   {
@@ -1266,7 +1277,7 @@
       if (!EDIT.on) return;
       EDIT.lx = e.clientX; EDIT.ly = e.clientY;
       if (e.button === 2) { EDIT.orbit = true; return; }                       // clic droit = tourner la vue
-      if (e.button === 1) { EDIT.pan = true; e.preventDefault(); return; }      // clic milieu = déplacer la vue (glisser)
+      if (e.button === 1 || EDIT.space) { EDIT.pan = true; e.preventDefault(); return; }   // clic milieu OU barre Espace = déplacer la vue (main Photoshop)
       const pick = editPick(e);
       if (pick) { editSelect(pick); EDIT.drag = true; }                        // clic sur objet = sélectionne + déplace
       else { const g = editHitGround(e); if (g) { editSelect(editSpawn(EDIT.type, g.x, g.z, 0, null, true)); EDIT.drag = true; } }  // clic sol = pose
