@@ -145,9 +145,21 @@
     heroMesh.add(m);
     heroMixer = new THREE.AnimationMixer(m);
     const clips = gltf.animations || [];
-    // retire le ROOT MOTION : SEULEMENT la translation du bassin (Hips) — on garde toutes les autres
-    // positions (dont la tête/cou) sinon elles se déforment. La physique gère le déplacement/saut.
-    clips.forEach(c => { c.tracks = c.tracks.filter(t => !(t.name.includes('Hips') && t.name.endsWith('.position'))); });
+    // ROOT MOTION : on ne touche qu'à la piste de position du bassin (Hips).
+    //  - anims normales : on la retire (marche/saut SUR PLACE, la physique gère le déplacement)
+    //  - anim de CHUTE : on garde la composante VERTICALE (le corps descend au sol) mais on fige
+    //    l'horizontale à sa valeur de repos (sinon double déplacement avec l'élan qu'on ajoute).
+    const HIPS_REST_X = 0.364, HIPS_REST_Z = -11.285;
+    clips.forEach(c => {
+      const isFall = /fall/i.test(c.name);
+      c.tracks = c.tracks.filter(t => {
+        if (t.name.includes('Hips') && t.name.endsWith('.position')) {
+          if (isFall) { for (let i = 0; i < t.values.length; i += 3) { t.values[i] = HIPS_REST_X; t.values[i + 2] = HIPS_REST_Z; } return true; }
+          return false;
+        }
+        return true;
+      });
+    });
     const walk = clips.find(c => /walk/i.test(c.name)) || clips[0];
     const jump = clips.find(c => /obstacle/i.test(c.name)) || clips.find(c => /jump/i.test(c.name));
     const run  = clips.find(c => /run/i.test(c.name));
@@ -166,7 +178,7 @@
   const HERO_SPEED = 3.6, HERO_JUMP = 6.0, HERO_GRAVITY = 15, HERO_CLAMP = 14;
   const VR_HERO_SCALE = 0.6;                  // le perso est réduit en VR (paraît trop grand sinon)
   const HERO_RADIUS = 0.28;                   // rayon de collision du perso
-  let heroFallT = 0;                          // timer de chute (>0 = le perso est tombé, immobilisé)
+  let heroFallT = 0, heroFallVX = 0, heroFallVZ = 0;   // chute : timer + élan « de l'autre côté »
   function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
 
   // caméra 3e personne : orbite autour du perso (souris/tactile = tourner)
@@ -620,8 +632,8 @@
       scene.add(m);
       m.userData.mush = { base: spots[i].s, ph: Math.random() * 6.28 };
       mushrooms.push(m);
-      const bb = new THREE.Box3().setFromObject(m);       // obstacle : rayon + hauteur du chapeau
-      mushroomObstacles.push({ x: spots[i].x, z: spots[i].z, r: Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 * 0.7, top: bb.max.y * 0.75 });
+      const bb = new THREE.Box3().setFromObject(m);       // obstacle-plateforme : rayon + hauteur du chapeau
+      mushroomObstacles.push({ x: spots[i].x, z: spots[i].z, r: Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 * 0.6, top: bb.max.y * 0.9 });
     }
   });
 
@@ -1023,26 +1035,39 @@
     }
     // GRAVITÉ + SAUT du perso (commun PC/mobile/VR) + limite du jardin
     {
+      const prevY = hero.position.y;
       heroVelY -= HERO_GRAVITY * dt;
       hero.position.y += heroVelY * dt;
+      heroOnGround = false;
       if (hero.position.y <= 0) { hero.position.y = 0; heroVelY = 0; heroOnGround = true; }
       const hpr = Math.hypot(hero.position.x, hero.position.z);
       if (hpr > HERO_CLAMP) { hero.position.x *= HERO_CLAMP / hpr; hero.position.z *= HERO_CLAMP / hpr; }
-      // COLLISION CHAMPIGNONS : impossible de les traverser → il faut SAUTER par-dessus, sinon on TOMBE
-      for (const o of mushroomObstacles) {
+      // CHAMPIGNONS = obstacles-plateformes : on peut MONTER dessus, on ne peut pas les TRAVERSER ;
+      // si on CLIPPE le côté en SAUTANT → on TRÉBUCHE et on tombe de l'autre côté.
+      if (heroFallT <= 0) for (const o of mushroomObstacles) {
         const ox = hero.position.x - o.x, oz = hero.position.z - o.z;
         const rr = o.r + HERO_RADIUS, od2 = ox * ox + oz * oz;
-        if (od2 < rr * rr && hero.position.y < o.top - 0.05) {   // dans le champignon ET pas passé au-dessus
-          const od = Math.sqrt(od2) || 0.0001, push = rr - od;
-          hero.position.x += (ox / od) * push;                   // repoussé hors du champignon
-          hero.position.z += (oz / od) * push;
-          if (heroOnGround && heroMoving && heroFallT <= 0) {     // il fonçait dedans au sol → il TOMBE
-            heroFallT = 1.2;
-            if (fallAction) fallAction.reset();
+        if (od2 >= rr * rr) continue;                                    // pas dans le champignon
+        if (heroVelY <= 0 && prevY >= o.top - 0.06 && hero.position.y <= o.top) {
+          hero.position.y = o.top; heroVelY = 0; heroOnGround = true;    // ATTERRIT / se tient dessus
+        } else if (hero.position.y < o.top - 0.05) {                     // clippe le CÔTÉ (pas assez haut)
+          const od = Math.sqrt(od2) || 0.0001;
+          if (heroOnGround) {                                            // au sol → simple blocage (il bute)
+            const push = rr - od;
+            hero.position.x += (ox / od) * push; hero.position.z += (oz / od) * push;
+          } else {                                                       // en l'air → TRÉBUCHE, tombe de l'autre côté
+            heroFallT = 1.4; if (fallAction) fallAction.reset();
+            hero.position.y = 0; heroVelY = 0; heroOnGround = true;
+            heroFallVX = Math.sin(hero.rotation.y) * 2.6;
+            heroFallVZ = Math.cos(hero.rotation.y) * 2.6;
           }
         }
       }
-      if (heroFallT > 0) heroFallT = Math.max(0, heroFallT - dt);
+      if (heroFallT > 0) {                                               // pendant la chute : glisse de l'autre côté
+        hero.position.x += heroFallVX * dt; hero.position.z += heroFallVZ * dt;
+        heroFallVX *= 0.94; heroFallVZ *= 0.94;
+        heroFallT = Math.max(0, heroFallT - dt);
+      }
       // ANIMATION : Fall (tombé) > Jump (en l'air) > Walking (bouge) > Idle (arrêt) — fondus doux
       if (heroMixer) {
         const airborne = !heroOnGround, falling = heroFallT > 0;
