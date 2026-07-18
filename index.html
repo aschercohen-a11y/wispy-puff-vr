@@ -55,6 +55,16 @@
   <div id="victory" class="overlay hidden"><button id="btn-replay">replay</button></div>
 </div>
 
+<!-- Écran de chargement (masque la scène tant que les modèles ne sont pas prêts) -->
+<div id="loadingScreen" style="position:fixed;inset:0;z-index:200;background:linear-gradient(160deg,#7ec3f0,#a9e0c0);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Trebuchet MS',sans-serif;color:#fff;transition:opacity .6s;">
+  <div style="font-size:36px;font-weight:bold;text-shadow:0 2px 8px rgba(0,0,0,.25);margin-bottom:6px;">🧡 Wispy Puff</div>
+  <div style="font-size:15px;opacity:.92;margin-bottom:24px;">Préparation du village…</div>
+  <div style="width:270px;height:16px;background:rgba(255,255,255,.28);border-radius:10px;overflow:hidden;box-shadow:inset 0 2px 6px rgba(0,0,0,.22);">
+    <div id="loadingBar" style="width:0%;height:100%;background:linear-gradient(90deg,#ffd15c,#ff8fc7);border-radius:10px;transition:width .3s;"></div>
+  </div>
+  <div id="loadingPct" style="font-size:13px;margin-top:10px;opacity:.85;">0%</div>
+</div>
+
 <div id="info">🧡 Wispy Puff — dirige le personnage ! <b>PC :</b> joystick (bas-gauche) ou <b>WASD</b> = marcher · <b>glisser la souris</b> = tourner la caméra · <b>Espace</b> ou ⤒ = sauter · attrape les diamants et les pièces d'or ! <b>Mobile :</b> joystick + bouton saut. <b>Casque :</b> ENTER VR (stick = marcher, A/B = saut).</div>
 
 <!-- Musique de fond + bouton on/off -->
@@ -111,6 +121,16 @@
   import { OrbitControls } from './vendor/controls/OrbitControls.js';
 
   const gameCanvas = document.getElementById('game');
+
+  // Écran de chargement : suit TOUS les modèles via le LoadingManager par défaut (utilisé par tous les GLTFLoader)
+  {
+    const ls = document.getElementById('loadingScreen'), lb = document.getElementById('loadingBar'), lp = document.getElementById('loadingPct');
+    let done = false;
+    const hide = () => { if (done || !ls) return; done = true; ls.style.opacity = '0'; setTimeout(() => ls.remove(), 700); };
+    THREE.DefaultLoadingManager.onProgress = (url, loaded, total) => { const pct = total ? Math.round(loaded / total * 100) : 0; if (lb) lb.style.width = pct + '%'; if (lp) lp.textContent = pct + '%'; };
+    THREE.DefaultLoadingManager.onLoad = () => { if (lb) lb.style.width = '100%'; if (lp) lp.textContent = '100%'; setTimeout(hide, 350); };
+    setTimeout(hide, 25000);   // filet de sécurité si un asset ne se charge pas
+  }
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9fc4ea); // secours si la texture du ciel tarde (bleu jour)
@@ -928,7 +948,7 @@
   }
   function setPedScale(s) {   // taille réglable dans l'éditeur (multiplie l'échelle de base)
     pedScale = Math.max(0.3, Math.min(3, s));
-    for (const p of peds) { p.mesh.scale.setScalar(p.fit * pedScale); p.mesh.position.y = 0; p.mesh.updateMatrixWorld(true); p.footOffset = -new THREE.Box3().setFromObject(p.mesh).min.y; }
+    for (const p of peds) { p.mesh.scale.setScalar(p.fit * pedScale); p.mesh.position.y = 0; p.mesh.updateMatrixWorld(true); p.footOffset = -new THREE.Box3().setFromObject(p.mesh).min.y; if (p.stroller && p.strollerFit) { p.stroller.scale.setScalar(p.strollerFit * pedScale); p.stroller.updateMatrixWorld(true); p.stroller.userData.foot = -new THREE.Box3().setFromObject(p.stroller).min.y; } }
   }
   function applyPedScale(s) { const go = () => { if (peds.length) setPedScale(s); else setTimeout(go, 400); }; go(); }
   const sideZ = (sgn) => ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);     // centre d'un trottoir
@@ -941,7 +961,7 @@
   }
   // pose "pousser" des bras (delta appliqué par-dessus la pose de repos) — ajustable
   const ARM_POSE = { LeftArm: [0, 0, 1.25], RightArm: [0, 0, -1.25], LeftForeArm: [0, 0, 0.35], RightForeArm: [0, 0, -0.35] };
-  const STROLLER_DIST = 0.42, STROLLER_H = 0.5, STROLLER_YAW = 0;
+  const STROLLER_DIST = 0.5, STROLLER_H = 0.6, STROLLER_YAW = Math.PI / 2;   // poignée côté femme (avant du modèle = -X)
   const _q = new THREE.Quaternion(), _e = new THREE.Euler();
   function spawnPed(url, startX, startSide, opts) {
     opts = opts || {};
@@ -964,7 +984,8 @@
         new GLTFLoader().load('models/stroller.glb', function (g2) {
           const st = g2.scene; st.traverse(o => { if (o.isMesh) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) mt.side = THREE.DoubleSide; }); } });
           st.updateMatrixWorld(true);
-          const sb = new THREE.Box3().setFromObject(st), sh = (sb.max.y - sb.min.y) || 1; st.scale.setScalar(STROLLER_H / sh);
+          const sb = new THREE.Box3().setFromObject(st), sh = (sb.max.y - sb.min.y) || 1; p.strollerFit = STROLLER_H / sh;
+          st.scale.setScalar(p.strollerFit * pedScale);
           st.updateMatrixWorld(true); const sb2 = new THREE.Box3().setFromObject(st); st.userData.foot = -sb2.min.y;
           scene.add(st); p.stroller = st;
         });
@@ -975,6 +996,7 @@
   spawnPed('models/kid.glb', -8, -1, {});
   spawnPed('models/woman.glb', 6, 1, { stroller: true });
   function updatePeds(dt) {
+    crossBlock.active = false;                             // recalculé chaque frame : actif si UN piéton traverse
     for (const p of peds) {
       p.mixer.update(dt);
       let vx = 0, vz = 0;
@@ -991,18 +1013,19 @@
         }
       } else if (p.state === 'goto') {                                   // rejoint le passage piéton sur le trottoir
         vx = p.dir; p.mesh.position.x += p.dir * PED_SPEED * dt;
-        if (Math.abs(p.mesh.position.x - p.crossX) < 0.12) { p.mesh.position.x = p.crossX; p.state = 'cross'; crossBlock.active = true; crossBlock.x = p.crossX; crossBlock.halfW = p.crossHalfW || 2.5; }
-      } else {                                                           // cross : traverse la route
+        if (Math.abs(p.mesh.position.x - p.crossX) < 0.12) { p.mesh.position.x = p.crossX; p.state = 'cross'; }
+      } else {                                                           // cross : traverse la route → bloque les voitures
+        crossBlock.active = true; crossBlock.x = p.crossX; crossBlock.halfW = p.crossHalfW || 2.5;
         const targetZ = sideZ(-p.side), s = Math.sign(targetZ - p.mesh.position.z);
         vz = s; p.mesh.position.z += s * PED_SPEED * dt;
-        if (Math.abs(targetZ - p.mesh.position.z) < 0.06) { p.mesh.position.z = targetZ; p.side = -p.side; p.state = 'walk'; p.dir = Math.random() < 0.5 ? 1 : -1; p.crossTimer = 6 + Math.random() * 6; crossBlock.active = false; }
+        if (Math.abs(targetZ - p.mesh.position.z) < 0.06) { p.mesh.position.z = targetZ; p.side = -p.side; p.state = 'walk'; p.dir = Math.random() < 0.5 ? 1 : -1; p.crossTimer = 6 + Math.random() * 6; }
       }
       if (vx || vz) p.mesh.rotation.y = Math.atan2(vx, vz) + PED_MODEL_YAW;   // face au déplacement
       p.mesh.position.y = p.footOffset + pedGroundH(p.mesh.position.z);       // suit trottoir/route/herbe
       if (p.armBones) for (const a of p.armBones) a.bone.quaternion.copy(a.bind).multiply(a.delta);   // bras figés sur la barre (après l'anim)
       if (p.stroller) {                                                       // poussette devant, avance avec la femme
-        const rot = p.mesh.rotation.y, fx = Math.sin(rot), fz = Math.cos(rot);
-        p.stroller.position.set(p.mesh.position.x + fx * STROLLER_DIST, (p.stroller.userData.foot || 0) + pedGroundH(p.mesh.position.z), p.mesh.position.z + fz * STROLLER_DIST);
+        const rot = p.mesh.rotation.y, fx = Math.sin(rot), fz = Math.cos(rot), dist = STROLLER_DIST * pedScale;
+        p.stroller.position.set(p.mesh.position.x + fx * dist, (p.stroller.userData.foot || 0) + pedGroundH(p.mesh.position.z), p.mesh.position.z + fz * dist);
         p.stroller.rotation.y = rot + STROLLER_YAW;
       }
     }
