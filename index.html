@@ -187,7 +187,7 @@
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
-  const ROAD = { z: 0, len: 28, w: 3, sideW: 1.3, sideH: 0.13 };   // route le long de l'axe X (trottoirs élargis)
+  const ROAD = { z: 0, len: 28, w: 3, sideW: 2.2, sideH: 0.13 };   // route le long de l'axe X (trottoirs larges)
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
   function tryJump() { if (heroOnGround && heroFallT <= 0) { heroVelY = HERO_JUMP; heroOnGround = false; } }
@@ -283,10 +283,9 @@
     });
     dom.addEventListener('pointermove', (e) => {
       if (EDIT.on || !dragLook) return;
-      camYaw   -= (e.clientX - lastLX) * 0.005;
-      camPitch += (e.clientY - lastLY) * 0.005;
+      camPitch += (e.clientY - lastLY) * 0.005;              // caméra derrière : la souris règle juste la hauteur de vue
       lastLX = e.clientX; lastLY = e.clientY;
-      camPitch = Math.max(0.08, Math.min(1.3, camPitch));
+      camPitch = Math.max(0.12, Math.min(1.3, camPitch));
     });
     const endLook = () => { dragLook = false; };
     dom.addEventListener('pointerup', endLook);
@@ -338,10 +337,9 @@
     dom.addEventListener('touchstart', (e) => { const t = e.changedTouches[0]; lookId = t.identifier; lastLX = t.clientX; lastLY = t.clientY; }, { passive: false });
     dom.addEventListener('touchmove', (e) => {
       for (const t of e.changedTouches) if (t.identifier === lookId) {
-        camYaw   -= (t.clientX - lastLX) * 0.005;   // orbite caméra autour du perso
-        camPitch += (t.clientY - lastLY) * 0.005;
+        camPitch += (t.clientY - lastLY) * 0.005;   // caméra derrière : glisser = hauteur de vue
         lastLX = t.clientX; lastLY = t.clientY;
-        camPitch = Math.max(0.08, Math.min(1.3, camPitch));
+        camPitch = Math.max(0.12, Math.min(1.3, camPitch));
       }
       e.preventDefault();
     }, { passive: false });
@@ -1054,9 +1052,7 @@
         while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
         hero.rotation.y += d * Math.min(1, dt * 12);
       }
-      const snap = (rx > 0.7) ? 1 : (rx < -0.7) ? -1 : 0;          // stick droit = tourne la caméra autour du perso
-      if (snap && !prevSnap) camYaw += snap * Math.PI / 6;
-      prevSnap = snap;
+      // (caméra auto derrière le perso — plus de rotation manuelle au stick droit)
     }
   }
 
@@ -1098,8 +1094,8 @@
     const m = base.clone(true);
     const s = scale != null ? scale : (EDIT_TYPES[type] ? EDIT_TYPES[type].s : 1);
     m.scale.setScalar(s);
-    m.position.set(x, groundOffset(m), z);
     m.rotation.y = rotY || 0;
+    m.position.set(x, 0, z); editGroundize(m);
     scene.add(m);
     const rec = { type, mesh: m, scale: s };
     EDIT.placed.push(rec);
@@ -1112,7 +1108,8 @@
     editRing.visible = !!rec;
     if (rec) { const bb = new THREE.Box3().setFromObject(rec.mesh); editRing.scale.setScalar(Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2 + 0.3); editRing.position.set(rec.mesh.position.x, 0.06, rec.mesh.position.z); }
   }
-  function editReground(rec) { rec.mesh.scale.setScalar(rec.scale); rec.mesh.position.y = groundOffset(rec.mesh); editSelect(rec); }
+  function editGroundize(m) { m.position.y = 0; m.position.y = -new THREE.Box3().setFromObject(m).min.y; }   // pose la base au sol (indépendant de la position actuelle)
+  function editReground(rec) { rec.mesh.scale.setScalar(rec.scale); editGroundize(rec.mesh); editSelect(rec); }
   function editDelete() { if (!EDIT.sel) return; scene.remove(EDIT.sel.mesh); EDIT.placed = EDIT.placed.filter(r => r !== EDIT.sel); EDIT.sel = null; if (editRing) editRing.visible = false; editSave(); }
   function editSerialize() { return EDIT.placed.map(r => ({ type: r.type, x: +r.mesh.position.x.toFixed(2), z: +r.mesh.position.z.toFixed(2), rotY: +r.mesh.rotation.y.toFixed(3), scale: +r.scale.toFixed(3) })); }
   function editSave() {
@@ -1142,7 +1139,7 @@
   // --- Interface éditeur ---
   const edPanel = document.createElement('div');
   edPanel.style.cssText = 'position:fixed;top:64px;left:12px;z-index:50;background:rgba(12,22,42,.92);border:2px solid #6fd;border-radius:12px;padding:10px;color:#dff;font:13px sans-serif;display:none;max-width:210px;';
-  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>WASD/flèches</b> = déplacer la caméra · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer · <b>R</b> pivoter · <b>+/−</b> taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
+  edPanel.innerHTML = '<b>🛠️ Éditeur</b><br><small><b>WASD</b> = déplacer la caméra · <b>molette</b> = zoom · <b>clic-droit</b> glisser = tourner la vue · clic sol = poser · clic objet = sélectionner · glisser = déplacer.<br>Objet sélectionné : <b>◄ ►</b> = tourner (2 sens) · <b>▲ ▼</b> = taille · <b>Suppr</b> effacer</small><div id="edPal" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div><button id="edDel" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;">🗑️ Supprimer la sélection</button><button id="edExport" style="margin-top:6px;width:100%;padding:6px;border-radius:6px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;">📋 Exporter le placement</button>';
   document.body.appendChild(edPanel);
   const edPal = edPanel.querySelector('#edPal');
   function edHighlight() { [...edPal.children].forEach(c => c.style.background = c.dataset.t === EDIT.type ? '#36e0d0' : 'rgba(50,80,120,.5)'); }
@@ -1171,18 +1168,27 @@
   addEventListener('keydown', (e) => {
     if (e.code === 'KeyE' && !e.repeat) { toggleEdit(); return; }
     if (!EDIT.on) return;
-    // PAN caméra (WASD / flèches) — se balader sur la carte, marche même sans sélection
+    // PAN caméra : WASD (toujours)
     const step = EDIT.dist * 0.06, fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw);
-    if (e.code === 'KeyW' || e.code === 'ArrowUp')    { EDIT.tx -= fx * step; EDIT.tz -= fz * step; e.preventDefault(); }
-    else if (e.code === 'KeyS' || e.code === 'ArrowDown') { EDIT.tx += fx * step; EDIT.tz += fz * step; e.preventDefault(); }
-    else if (e.code === 'KeyA' || e.code === 'ArrowLeft') { EDIT.tx -= fz * step; EDIT.tz += fx * step; e.preventDefault(); }
-    else if (e.code === 'KeyD' || e.code === 'ArrowRight') { EDIT.tx += fz * step; EDIT.tz -= fx * step; e.preventDefault(); }
-    // actions sur la sélection
-    if (!EDIT.sel) return;
-    if (e.code === 'KeyR') { EDIT.sel.mesh.rotation.y += Math.PI / 12; editSelect(EDIT.sel); editSave(); }
-    else if (e.code === 'Equal' || e.code === 'NumpadAdd') { EDIT.sel.scale *= 1.1; editReground(EDIT.sel); editSave(); }
-    else if (e.code === 'Minus' || e.code === 'NumpadSubtract') { EDIT.sel.scale *= 0.9; editReground(EDIT.sel); editSave(); }
-    else if (e.code === 'Delete' || e.code === 'Backspace') editDelete();
+    if (e.code === 'KeyW') { EDIT.tx -= fx * step; EDIT.tz -= fz * step; e.preventDefault(); return; }
+    if (e.code === 'KeyS') { EDIT.tx += fx * step; EDIT.tz += fz * step; e.preventDefault(); return; }
+    if (e.code === 'KeyA') { EDIT.tx -= fz * step; EDIT.tz += fx * step; e.preventDefault(); return; }
+    if (e.code === 'KeyD') { EDIT.tx += fz * step; EDIT.tz -= fx * step; e.preventDefault(); return; }
+    if (EDIT.sel) {   // objet sélectionné : flèches = TOURNER (G/D, les 2 sens) et TAILLE (H/B)
+      if (e.code === 'ArrowLeft')  { EDIT.sel.mesh.rotation.y -= Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
+      if (e.code === 'ArrowRight') { EDIT.sel.mesh.rotation.y += Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
+      if (e.code === 'ArrowUp')    { EDIT.sel.scale *= 1.05; editReground(EDIT.sel); editSave(); e.preventDefault(); return; }
+      if (e.code === 'ArrowDown')  { EDIT.sel.scale *= 0.95; editReground(EDIT.sel); editSave(); e.preventDefault(); return; }
+      if (e.code === 'KeyR') { EDIT.sel.mesh.rotation.y += Math.PI / 12; editSelect(EDIT.sel); editSave(); return; }
+      if (e.code === 'Equal' || e.code === 'NumpadAdd') { EDIT.sel.scale *= 1.1; editReground(EDIT.sel); editSave(); return; }
+      if (e.code === 'Minus' || e.code === 'NumpadSubtract') { EDIT.sel.scale *= 0.9; editReground(EDIT.sel); editSave(); return; }
+      if (e.code === 'Delete' || e.code === 'Backspace') { editDelete(); return; }
+    } else {          // rien de sélectionné : les flèches pannent aussi la caméra
+      if (e.code === 'ArrowUp')    { EDIT.tx -= fx * step; EDIT.tz -= fz * step; e.preventDefault(); }
+      else if (e.code === 'ArrowDown')  { EDIT.tx += fx * step; EDIT.tz += fz * step; e.preventDefault(); }
+      else if (e.code === 'ArrowLeft')  { EDIT.tx -= fz * step; EDIT.tz += fx * step; e.preventDefault(); }
+      else if (e.code === 'ArrowRight') { EDIT.tx += fz * step; EDIT.tz -= fx * step; e.preventDefault(); }
+    }
   });
   // souris éditeur (sur le canvas)
   {
@@ -1199,7 +1205,7 @@
     dom.addEventListener('pointermove', (e) => {
       if (!EDIT.on) return;
       if (EDIT.orbit) { EDIT.yaw -= (e.clientX - EDIT.lx) * 0.006; EDIT.pitch = Math.max(0.25, Math.min(1.45, EDIT.pitch + (e.clientY - EDIT.ly) * 0.006)); EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
-      else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { EDIT.sel.mesh.position.set(g.x, groundOffset(EDIT.sel.mesh), g.z); editSelect(EDIT.sel); } }
+      else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); editSelect(EDIT.sel); } }
     });
     const edUp = () => { if (EDIT.drag || EDIT.orbit) editSave(); EDIT.drag = false; EDIT.orbit = false; };
     dom.addEventListener('pointerup', edUp); dom.addEventListener('pointercancel', edUp);
@@ -1335,6 +1341,8 @@
         heroMixer.update(dt);
       }
       heroMesh.scale.setScalar(presenting ? VR_HERO_SCALE : 1);      // perso réduit en VR
+      // caméra TOUJOURS DERRIÈRE le perso : camYaw suit doucement l'orientation du perso
+      { let d = (hero.rotation.y + Math.PI) - camYaw; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; camYaw += d * Math.min(1, dt * 5); }
       if (presenting) updateFollowRigVR(); else updateFollowCam();   // caméra suit le perso (VR = rig, PC = caméra)
     }
     if (grassWind) grassWind.value = time * 0.001;      // vent dans l'herbe
