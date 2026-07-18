@@ -468,9 +468,11 @@
     return t;
   }
   const GARDEN_R = 58;                                            // rayon du jardin (plateau doublé pour la route allongée)
+  const GROUND_R = 160;                                          // SOL runner : grand disque qui suit le perso (couvre tout le champ visible)
+  const _groundTex = makeGrassTexture(); _groundTex.repeat.set(77, 77);   // densité d'herbe adaptée au grand disque
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(GARDEN_R, 64),
-    new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 1, metalness: 0 })
+    new THREE.CircleGeometry(GROUND_R, 64),
+    new THREE.MeshStandardMaterial({ map: _groundTex, roughness: 1, metalness: 0 })
   );
   ground.rotation.x = -Math.PI / 2;                              // à plat
   scene.add(ground);
@@ -1689,7 +1691,8 @@
       const hx = hero.position.x;
       if (roadMesh) { roadMesh.position.x = hx; if (roadTex) roadTex.offset.x = -hx / 4; }   // route infinie + marquage qui défile
       for (const s of sideMeshes) s.position.x = hx;               // trottoirs suivent
-      if (grassMesh) grassMesh.position.x = hx;                    // herbe suit
+      if (ground) { ground.position.x = hx; if (ground.material.map) ground.material.map.offset.x = -hx / 4.14; }   // SOL vert suit (plus de trous bleus) + herbe qui DÉFILE
+      if (grassMesh && grassMesh.visible) grassMesh.visible = false;   // brins 3D coupés en runner (défilement incohérent)
       if (decorReady) for (const it of recycleDecor) {             // décor posé : boucle sans fin
         while (it.mesh.position.x < hx - 26) it.mesh.position.x += it.span;
         while (it.mesh.position.x > hx + it.span - 26) it.mesh.position.x -= it.span;
