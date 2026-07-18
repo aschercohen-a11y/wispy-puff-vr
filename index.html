@@ -785,19 +785,19 @@
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.center.set(0.5, 0.5); return t;
   }
   // proportions calibrées (unités locales du modèle, centre = 0 ; hauteur ~1.11)
-  const FW = { BASIN_Y: -0.10, BASIN_IN: 0.34, BASIN_R: 0.72, BOWL_Y: 0.28, BOWL_R: 0.24, SPOUT_Y: 0.32, JT_R: 0.30, JT_Y: 0.22, LAND_R: 0.55 };
+  const FW = { BASIN_Y: -0.10, BASIN_IN: 0.34, BASIN_R: 0.72, BOWL_Y: 0.28, BOWL_R: 0.24, SPOUT_Y: 0.34, JT_R: 0.33, JT_Y: 0.31, LAND_R: 0.55 };
   function buildFountainWater(m, s) {
     const grp = new THREE.Group(); grp.name = 'WATER'; const jets = [], ripples = [];
     const dropMat = new THREE.PointsMaterial({ map: _dropTex, size: 0.085 * s, transparent: true, depthWrite: false, opacity: 0.95, blending: THREE.AdditiveBlending, sizeAttenuation: true, color: 0xbfefff });
     // jet central (colonne bien fournie qui fane légèrement)
-    const cN = 50, cPos = new Float32Array(cN * 3), cPh = new Float32Array(cN);
+    const cN = 80, cPos = new Float32Array(cN * 3), cPh = new Float32Array(cN);
     for (let i = 0; i < cN; i++) cPh[i] = i / cN;
     const cGeo = new THREE.BufferGeometry(); cGeo.setAttribute('position', new THREE.BufferAttribute(cPos, 3));
     const cPts = new THREE.Points(cGeo, dropMat); cPts.frustumCulled = false; grp.add(cPts);
     jets.push({ type: 'c', pos: cPos, ph: cPh, geo: cGeo });
     // 8 cascades latérales = RUBANS épais (plusieurs brins) tout autour → masquent les jets figés
     for (let k = 0; k < 8; k++) {
-      const ang = k * Math.PI / 4, strands = 4, perStrand = 8, sN = strands * perStrand;
+      const ang = k * Math.PI / 4, strands = 5, perStrand = 10, sN = strands * perStrand;
       const pos = new Float32Array(sN * 3), ph = new Float32Array(sN), off = new Float32Array(sN);
       let idx = 0;
       for (let a = 0; a < strands; a++) for (let b = 0; b < perStrand; b++) { ph[idx] = b / perStrand + a * 0.015; off[idx] = (a - (strands - 1) / 2) / (strands - 1); idx++; }
@@ -823,7 +823,7 @@
     for (const j of w.jets) {
       const p = j.pos, n = j.ph.length;
       if (j.type === 'c') {
-        for (let i = 0; i < n; i++) { const f = (j.ph[i] + t * 0.8) % 1, y = FW.SPOUT_Y + 0.19 * 4 * f * (1 - f), r = 0.02 + 0.085 * f, a = i * 2.399; p[i * 3] = Math.cos(a) * r; p[i * 3 + 1] = y; p[i * 3 + 2] = Math.sin(a) * r; }
+        for (let i = 0; i < n; i++) { const f = (j.ph[i] + t * 0.8) % 1, y = FW.SPOUT_Y + 0.30 * 4 * f * (1 - f), r = 0.02 + 0.12 * f, a = i * 2.399; p[i * 3] = Math.cos(a) * r; p[i * 3 + 1] = y; p[i * 3 + 2] = Math.sin(a) * r; }
       } else {
         const ca = Math.cos(j.ang), sa = Math.sin(j.ang), tx = -sa, tz = ca;   // tangente horizontale (largeur du ruban)
         for (let i = 0; i < n; i++) { const f = (j.ph[i] + t * 0.7) % 1, r = FW.JT_R + (FW.LAND_R - FW.JT_R) * f, y = FW.JT_Y + (FW.BASIN_Y - FW.JT_Y) * (f * f), band = 0.11 * j.off[i]; p[i * 3] = ca * r + tx * band; p[i * 3 + 1] = y; p[i * 3 + 2] = sa * r + tz * band; }
