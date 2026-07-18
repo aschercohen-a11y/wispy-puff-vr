@@ -120,7 +120,7 @@
   const MODEL_YAW = 0;                        // orientation du modèle (validé : on voit le dos en marche avant)
   let heroMixer = null, walkAction = null, runAction = null, jumpAction = null, idleAction = null, fallAction = null, heroReady = false;
   let heroWasAir = false, heroJumpW = 0, heroWalkW = 0, heroIdleW = 0, heroFallW = 0;   // fondus idle/walk/jump/fall
-  new GLTFLoader().load('models/character.glb?v=1', function (gltf) {
+  new GLTFLoader().load('models/character.glb?v=2', function (gltf) {
     const m = gltf.scene;
     let box = new THREE.Box3().setFromObject(m);
     const size = new THREE.Vector3(); box.getSize(size);
