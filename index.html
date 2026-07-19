@@ -824,13 +824,20 @@
     assetBase.crosswalk = grp;                                                                // dispo dans l'éditeur
   }
 
+  // texture DALLES de trottoir (petits carrés) partagée : clone + repeat par mesh
+  const TILE_TEX = (function () {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+    x.fillStyle = '#c8c0ad'; x.fillRect(0, 0, 64, 64);
+    x.strokeStyle = 'rgba(122,114,98,0.6)'; x.lineWidth = 5; x.strokeRect(2.5, 2.5, 59, 59);   // joint sombre autour de chaque dalle
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+  })();
+  const tileMat = (w, h) => { const tex = TILE_TEX.clone(); tex.needsUpdate = true; tex.repeat.set(Math.max(1, Math.round(w / 1.2)), Math.max(1, Math.round(h / 1.2))); return new THREE.MeshBasicMaterial({ map: tex }); };
   // --- ROUTE TRANSVERSALE (procédurale) : chaussée 3 voies à poser EN TRAVERS (façon intersection) ---
   {
     const grp = new THREE.Group(), LEN = 30, W = 6;                                          // largeur = route principale
     const asph = new THREE.Mesh(new THREE.PlaneGeometry(LEN, W), new THREE.MeshBasicMaterial({ color: 0x555a63 }));
     asph.rotation.x = -Math.PI / 2; asph.position.y = 0.02; grp.add(asph);
-    const sw = new THREE.MeshBasicMaterial({ color: 0xc3bcaa });
-    for (const sgn of [-1, 1]) { const s = new THREE.Mesh(new THREE.PlaneGeometry(LEN, 3.2), sw); s.rotation.x = -Math.PI / 2; s.position.set(0, 0.014, sgn * (W / 2 + 1.6)); grp.add(s); }   // trottoirs des 2 côtés
+    for (const sgn of [-1, 1]) { const s = new THREE.Mesh(new THREE.PlaneGeometry(LEN, 3.2), tileMat(LEN, 3.2)); s.rotation.x = -Math.PI / 2; s.position.set(0, 0.014, sgn * (W / 2 + 1.6)); grp.add(s); }   // trottoirs dallés des 2 côtés
     const line = (c) => new THREE.MeshBasicMaterial({ color: c });
     for (const zc of [-W / 2 + 0.25, W / 2 - 0.25]) { const e = new THREE.Mesh(new THREE.PlaneGeometry(LEN, 0.18), line(0xe9e4d2)); e.rotation.x = -Math.PI / 2; e.position.set(0, 0.021, zc); grp.add(e); }   // bords blancs
     for (const zc of [-1, 1]) for (let x = -LEN / 2 + 1; x < LEN / 2; x += 2.5) { const d = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.16), line(0xf2e7c4)); d.rotation.x = -Math.PI / 2; d.position.set(x, 0.022, zc); grp.add(d); }   // 2 pointillés = 3 voies
@@ -850,8 +857,8 @@
   // --- CARREFOUR (tuile) : croisement 4 voies + trottoirs aux 4 coins, en UN bloc propre ---
   {
     const grp = new THREE.Group(), ARM = 6, HALF = 6.2, cw = HALF - ARM / 2;   // bras = largeur route ; coins = trottoirs
-    const asph = new THREE.MeshBasicMaterial({ color: 0x555a63 }), side = new THREE.MeshBasicMaterial({ color: 0xc3bcaa }), line = new THREE.MeshBasicMaterial({ color: 0xf2e7c4 });
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const c = new THREE.Mesh(new THREE.PlaneGeometry(cw, cw), side); c.rotation.x = -Math.PI / 2; c.position.set(sx * (ARM / 2 + cw / 2), 0.028, sz * (ARM / 2 + cw / 2)); grp.add(c); }   // 4 trottoirs de coin (au-dessus)
+    const asph = new THREE.MeshBasicMaterial({ color: 0x555a63 }), line = new THREE.MeshBasicMaterial({ color: 0xf2e7c4 });
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const c = new THREE.Mesh(new THREE.PlaneGeometry(cw, cw), tileMat(cw, cw)); c.rotation.x = -Math.PI / 2; c.position.set(sx * (ARM / 2 + cw / 2), 0.028, sz * (ARM / 2 + cw / 2)); grp.add(c); }   // 4 trottoirs de coin dallés (au-dessus)
     const hArm = new THREE.Mesh(new THREE.PlaneGeometry(HALF * 2, ARM), asph); hArm.rotation.x = -Math.PI / 2; hArm.position.y = 0.03; grp.add(hArm);
     const vArm = new THREE.Mesh(new THREE.PlaneGeometry(ARM, HALF * 2), asph); vArm.rotation.x = -Math.PI / 2; vArm.position.y = 0.03; grp.add(vArm);
     const mkd = (w, h, x, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), line); m.rotation.x = -Math.PI / 2; m.position.set(x, 0.032, z); return m; };
