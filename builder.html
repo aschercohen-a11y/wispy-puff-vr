@@ -91,8 +91,8 @@ const LINE = new THREE.MeshBasicMaterial({ color: 0xf2e7c4 });
 const EDGE = new THREE.MeshBasicMaterial({ color: 0xe9e4d2 });
 
 // ---------- Dimensions d'une tuile ----------
-const T = 14, ROAD_W = 6, SIDE_W = 3.2, HALF = T / 2;   // 6 route + 2×3.2 trottoir + 2×0.8 herbe = 14
-const SIDE_Z = ROAD_W / 2 + SIDE_W / 2;                  // centre trottoir = 4.6
+const T = 14, ROAD_W = 6, HALF = T / 2, SIDE_W = HALF - ROAD_W / 2;   // 6 route + 2×4 trottoir = 14 PILE (trottoir jusqu'au bord → aucune languette d'herbe entre tuiles)
+const SIDE_Z = ROAD_W / 2 + SIDE_W / 2;                  // centre trottoir = 5
 
 function plane(w, h, mat, y, x, z) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.rotation.x = -Math.PI / 2; m.position.set(x || 0, y, z || 0); return m; }
 function sidewalk(w, h, x, z) { const m = plane(w, h, new THREE.MeshBasicMaterial({ map: tileTex(1) }), 0.014, x, z); m.material.map.repeat.set(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2))); return m; }
