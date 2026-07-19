@@ -289,8 +289,14 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (downXY && Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y) > 6) dragged = true;
-  if (grabbed) {   // glisse l'objet LIBREMENT où pointe la souris (aimanté à la grille 0.5) — tu peux le poser pile sur le trottoir
-    const w = worldPoint(e); if (w) { const sx = snap(w.x), sz = snap(w.z); grabbed.ox = sx - grabbed.gx * T; grabbed.oz = sz - grabbed.gz * T; grabbed.mesh.position.set(sx, 0.03, sz); }
+  if (grabbed) {   // glisse librement (aimanté grille 0.5) ; une PAIRE se déplace EN BLOC (les 2 gardent leur écartement, restent en face)
+    const w = worldPoint(e); if (w) {
+      const sx = snap(w.x), sz = snap(w.z);
+      if (grabbed.pid) {
+        const dx = sx - (grabbed.gx * T + grabbed.ox), dz = sz - (grabbed.gz * T + grabbed.oz);   // déplacement du lampadaire attrapé
+        for (const e2 of objects.values()) if (e2.pid === grabbed.pid) { e2.ox += dx; e2.oz += dz; e2.mesh.position.set(e2.gx * T + e2.ox, 0.03, e2.gz * T + e2.oz); }   // toute la paire suit le même déplacement
+      } else { grabbed.ox = sx - grabbed.gx * T; grabbed.oz = sz - grabbed.gz * T; grabbed.mesh.position.set(sx, 0.03, sz); }
+    }
     return;
   }
   updateGhost(e);
