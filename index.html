@@ -832,6 +832,16 @@
     assetBase.crossroad = grp;
   }
 
+  // --- ZONE (sol) : tuile d'herbe carrée (20×20) à poser pour AGRANDIR / former la carte ---
+  {
+    const grp = new THREE.Group(), T = 20;
+    const g = new THREE.Mesh(new THREE.PlaneGeometry(T, T), new THREE.MeshBasicMaterial({ color: 0x86ad63 }));
+    g.rotation.x = -Math.PI / 2; g.position.y = 0.004; grp.add(g);
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(T, T), new THREE.MeshBasicMaterial({ color: 0x4f7a3a, wireframe: true }));   // léger contour pour voir les tuiles
+    b.rotation.x = -Math.PI / 2; b.position.y = 0.006; grp.add(b);
+    assetBase.zone = grp;
+  }
+
   // --- FONTAINE : modèle pierre (Meshy) + EAU ANIMÉE par-dessus (jet central + 4 cascades + ondulations) ---
   const _dropTex = (function () {
     const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d');
@@ -1446,6 +1456,7 @@
     paving:   { label: '🧱 Dalle (sol)',     s: 1.0 },
     crosswalk:{ label: '🦓 Passage piéton',  s: 1.0 },
     crossroad:{ label: '🛣️ Route transversale', s: 1.0 },
+    zone:     { label: '🟩 Zone (sol)',      s: 1.0 },
     fountain: { label: '⛲ Fontaine',        s: 2.2 },
   };
   const _eray = new THREE.Raycaster(), _emouse = new THREE.Vector2(), _eplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _ehit = new THREE.Vector3();
@@ -1491,7 +1502,7 @@
     return rec;
   }
   // masque les brins d'herbe sous les objets de sol posés (dalle, passage piéton, allée)
-  const GROUND_TYPES = { paving: true, crosswalk: true, path: true, crossroad: true };
+  const GROUND_TYPES = { paving: true, crosswalk: true, path: true, crossroad: true, zone: true };
   const _zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
   function applyGroundMask() {
     if (!grassMesh || !grassOrig) return;
@@ -1703,7 +1714,7 @@
       if (e.button === 1 || EDIT.space || EDIT.handTool) { EDIT.pan = true; e.preventDefault(); return; }   // clic milieu / Espace / outil Main = déplacer la vue
       const pick = editPick(e);
       if (pick) { editSelect(pick); if (EDIT.rotMode) EDIT.rotDrag = true; else EDIT.drag = true; }   // clic objet = sélectionne, puis TOURNE (mode rotation) ou déplace
-      else if (EDIT.type) { const g = editHitGround(e); if (g) { editSelect(editSpawn(EDIT.type, g.x, g.z, 0, null, true)); EDIT.drag = true; } }  // clic sol = pose (seulement si un type est actif)
+      else if (EDIT.type) { const g = editHitGround(e); if (g) { if (EDIT.type === 'zone') { g.x = Math.round(g.x / 20) * 20; g.z = Math.round(g.z / 20) * 20; } editSelect(editSpawn(EDIT.type, g.x, g.z, 0, null, true)); EDIT.drag = true; } }  // clic sol = pose (zones calées sur grille 20)
       else { editSelect(null); }                                               // aucun type actif → clic sol = désélectionne (pas de pose)
     });
     dom.addEventListener('pointermove', (e) => {
@@ -1711,7 +1722,7 @@
       if (EDIT.orbit) { EDIT.yaw -= (e.clientX - EDIT.lx) * 0.006; EDIT.pitch = Math.max(0.25, Math.min(1.45, EDIT.pitch + (e.clientY - EDIT.ly) * 0.006)); EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
       else if (EDIT.pan) { const dx = e.clientX - EDIT.lx, dy = e.clientY - EDIT.ly, s = EDIT.dist * 0.0024, fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw); EDIT.tx += (Math.cos(EDIT.yaw) * dx - fx * dy) * s; EDIT.tz += (-fx * dx - fz * dy) * s; EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
       else if (EDIT.rotDrag && EDIT.sel) { EDIT.sel.mesh.rotation.y += (e.clientX - EDIT.lx) * 0.012; editSelect(EDIT.sel); EDIT.lx = e.clientX; EDIT.ly = e.clientY; }   // ROTATION 360° à la souris
-      else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); if (EDIT.sel.type === 'crosswalk') EDIT.sel.mesh.position.y = 0.014; editSelect(EDIT.sel); } }
+      else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { if (EDIT.sel.type === 'zone') { g.x = Math.round(g.x / 20) * 20; g.z = Math.round(g.z / 20) * 20; } EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); if (EDIT.sel.type === 'crosswalk') EDIT.sel.mesh.position.y = 0.014; editSelect(EDIT.sel); } }
     });
     const edUp = () => { if (EDIT.drag && EDIT.sel && GROUND_TYPES[EDIT.sel.type]) applyGroundMask(); if (EDIT.drag || EDIT.orbit || EDIT.rotDrag) editSave(); EDIT.drag = false; EDIT.orbit = false; EDIT.pan = false; EDIT.rotDrag = false; };
     dom.addEventListener('pointerup', edUp); dom.addEventListener('pointercancel', edUp);

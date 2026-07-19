@@ -848,6 +848,14 @@
     assetBase.crossroad = grp;
   }
 
+  // --- ZONE (sol) : tuile d'herbe carrée (20×20) à poser pour AGRANDIR / former la carte ---
+  {
+    const grp = new THREE.Group(), T = 20;
+    const g = new THREE.Mesh(new THREE.PlaneGeometry(T, T), new THREE.MeshBasicMaterial({ color: 0x86ad63 }));
+    g.rotation.x = -Math.PI / 2; g.position.y = 0.004; grp.add(g);
+    assetBase.zone = grp;
+  }
+
   // --- FONTAINE : modèle pierre (Meshy) + EAU ANIMÉE par-dessus (jet central + 4 cascades + ondulations) ---
   const _dropTex = (function () {
     const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d');
@@ -1479,6 +1487,7 @@
     paving:   { label: '🧱 Dalle (sol)',     s: 1.0 },
     crosswalk:{ label: '🦓 Passage piéton',  s: 1.0 },
     crossroad:{ label: '🛣️ Route transversale', s: 1.0 },
+    zone:     { label: '🟩 Zone (sol)',      s: 1.0 },
     fountain: { label: '⛲ Fontaine',        s: 2.2 },
   };
   const _eray = new THREE.Raycaster(), _emouse = new THREE.Vector2(), _eplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _ehit = new THREE.Vector3();
@@ -1525,7 +1534,7 @@
     return rec;
   }
   // masque les brins d'herbe sous les objets de sol posés (dalle, passage piéton, allée)
-  const GROUND_TYPES = { paving: true, crosswalk: true, path: true, crossroad: true };
+  const GROUND_TYPES = { paving: true, crosswalk: true, path: true, crossroad: true, zone: true };
   const _zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
   function applyGroundMask() {
     if (!grassMesh || !grassOrig) return;
