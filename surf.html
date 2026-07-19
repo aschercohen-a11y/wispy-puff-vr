@@ -1534,6 +1534,12 @@
       o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
     });
   }
+  // le CARREFOUR se cale pile sur la route transversale la plus proche (croisement avec la route principale z=0)
+  function snapCarrefour(x, z) {
+    let bx = x, bz = 0, bd = 1e9;
+    for (const r of EDIT.placed) if (r.type === 'crossroad') { const d = Math.hypot(r.mesh.position.x - x, r.mesh.position.z - z); if (d < bd) { bd = d; bx = r.mesh.position.x; bz = r.mesh.position.z; } }
+    return (bd < 30) ? { x: bx, z: bz } : { x: x, z: 0 };
+  }
   function editSpawn(type, x, z, rotY, scale, select) {
     const base = assetBase[type]; if (!base) return null;
     const m = base.clone(true); unlit(m);   // décor en unlit (garde la texture)

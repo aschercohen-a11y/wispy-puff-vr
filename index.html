@@ -1503,6 +1503,12 @@
       o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
     });
   }
+  // le CARREFOUR se cale pile sur la route transversale la plus proche (croisement avec la route principale z=0)
+  function snapCarrefour(x, z) {
+    let bx = x, bz = 0, bd = 1e9;
+    for (const r of EDIT.placed) if (r.type === 'crossroad') { const d = Math.hypot(r.mesh.position.x - x, r.mesh.position.z - z); if (d < bd) { bd = d; bx = r.mesh.position.x; bz = r.mesh.position.z; } }
+    return (bd < 30) ? { x: bx, z: bz } : { x: x, z: 0 };
+  }
   function editSpawn(type, x, z, rotY, scale, select) {
     const base = assetBase[type]; if (!base) return null;
     const m = base.clone(true); unlit(m);   // décor en unlit (garde la texture)
@@ -1741,7 +1747,7 @@
       if (e.button === 1 || EDIT.space || EDIT.handTool) { EDIT.pan = true; e.preventDefault(); return; }   // clic milieu / Espace / outil Main = déplacer la vue
       const pick = editPick(e);
       if (pick) { editSelect(pick); if (EDIT.rotMode) EDIT.rotDrag = true; else EDIT.drag = true; }   // clic objet = sélectionne, puis TOURNE (mode rotation) ou déplace
-      else if (EDIT.type) { const g = editHitGround(e); if (g) { if (EDIT.type === 'zone') { g.x = Math.round(g.x / 20) * 20; g.z = Math.round(g.z / 20) * 20; } editSelect(editSpawn(EDIT.type, g.x, g.z, 0, null, true)); EDIT.drag = true; } }  // clic sol = pose (zones calées sur grille 20)
+      else if (EDIT.type) { const g = editHitGround(e); if (g) { if (EDIT.type === 'zone') { g.x = Math.round(g.x / 20) * 20; g.z = Math.round(g.z / 20) * 20; } else if (EDIT.type === 'carrefour') { const s = snapCarrefour(g.x, g.z); g.x = s.x; g.z = s.z; } editSelect(editSpawn(EDIT.type, g.x, g.z, 0, null, true)); EDIT.drag = true; } }  // pose (zone=grille, carrefour=snap intersection)
       else { editSelect(null); }                                               // aucun type actif → clic sol = désélectionne (pas de pose)
     });
     dom.addEventListener('pointermove', (e) => {
@@ -1749,7 +1755,7 @@
       if (EDIT.orbit) { EDIT.yaw -= (e.clientX - EDIT.lx) * 0.006; EDIT.pitch = Math.max(0.25, Math.min(1.45, EDIT.pitch + (e.clientY - EDIT.ly) * 0.006)); EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
       else if (EDIT.pan) { const dx = e.clientX - EDIT.lx, dy = e.clientY - EDIT.ly, s = EDIT.dist * 0.0024, fx = Math.sin(EDIT.yaw), fz = Math.cos(EDIT.yaw); EDIT.tx += (Math.cos(EDIT.yaw) * dx - fx * dy) * s; EDIT.tz += (-fx * dx - fz * dy) * s; EDIT.lx = e.clientX; EDIT.ly = e.clientY; }
       else if (EDIT.rotDrag && EDIT.sel) { EDIT.sel.mesh.rotation.y += (e.clientX - EDIT.lx) * 0.012; editSelect(EDIT.sel); EDIT.lx = e.clientX; EDIT.ly = e.clientY; }   // ROTATION 360° à la souris
-      else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { if (EDIT.sel.type === 'zone') { g.x = Math.round(g.x / 20) * 20; g.z = Math.round(g.z / 20) * 20; } EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); if (EDIT.sel.type === 'crosswalk') EDIT.sel.mesh.position.y = 0.014; else if (EDIT.sel.type === 'crossroad' || EDIT.sel.type === 'carrefour' || EDIT.sel.type === 'zone') EDIT.sel.mesh.position.y = 0; editSelect(EDIT.sel); } }
+      else if (EDIT.drag && EDIT.sel) { const g = editHitGround(e); if (g) { if (EDIT.sel.type === 'zone') { g.x = Math.round(g.x / 20) * 20; g.z = Math.round(g.z / 20) * 20; } else if (EDIT.sel.type === 'carrefour') { const s = snapCarrefour(g.x, g.z); g.x = s.x; g.z = s.z; } EDIT.sel.mesh.position.set(g.x, 0, g.z); editGroundize(EDIT.sel.mesh); if (EDIT.sel.type === 'crosswalk') EDIT.sel.mesh.position.y = 0.014; else if (EDIT.sel.type === 'crossroad' || EDIT.sel.type === 'carrefour' || EDIT.sel.type === 'zone') EDIT.sel.mesh.position.y = 0; editSelect(EDIT.sel); } }
     });
     const edUp = () => { if (EDIT.drag && EDIT.sel && GROUND_TYPES[EDIT.sel.type]) applyGroundMask(); if (EDIT.drag || EDIT.orbit || EDIT.rotDrag) editSave(); EDIT.drag = false; EDIT.orbit = false; EDIT.pan = false; EDIT.rotDrag = false; };
     dom.addEventListener('pointerup', edUp); dom.addEventListener('pointercancel', edUp);
