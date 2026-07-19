@@ -1615,7 +1615,8 @@
     + '<div style="font-size:10px;opacity:.75;text-align:center;">bouger<br>fin (10cm)<br>· 🔄=tourner</div></div>'
     + '<div style="margin-top:6px;display:flex;gap:4px;">'
     + '<button id="edDel" style="flex:1;padding:6px;border-radius:5px;border:0;background:#e0566a;color:#fff;font-weight:bold;cursor:pointer;font-size:12px;">🗑️ Suppr</button>'
-    + '<button id="edExport" style="flex:1;padding:6px;border-radius:5px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;font-size:12px;">📋 Export</button></div>';
+    + '<button id="edExport" style="flex:1;padding:6px;border-radius:5px;border:0;background:#36e0d0;color:#023;font-weight:bold;cursor:pointer;font-size:12px;">📋 Export</button></div>'
+    + '<button id="edClear" style="margin-top:5px;width:100%;padding:6px;border-radius:5px;border:0;background:#8a3b3b;color:#fff;font-weight:bold;cursor:pointer;font-size:12px;">🧹 Tout effacer (repartir de zéro)</button>';
   document.body.appendChild(edPanel);
   const edPal = edPanel.querySelector('#edPal');
   function edHighlight() {
@@ -1665,6 +1666,13 @@
   const edRotBtn = edPanel.querySelector('#edRot');
   edRotBtn.onclick = () => { EDIT.rotMode = !EDIT.rotMode; edRotBtn.style.background = EDIT.rotMode ? '#36e0d0' : 'rgba(50,80,120,.5)'; edRotBtn.style.color = EDIT.rotMode ? '#023' : '#dff'; };
   edPanel.querySelector('#edDel').onclick = () => editDelete();
+  edPanel.querySelector('#edClear').onclick = () => {
+    if (!confirm('Tout effacer la carte et repartir de zéro ? (irréversible)')) return;
+    for (const r of EDIT.placed) scene.remove(r.mesh);
+    for (const c of villageClones) scene.remove(c); villageClones.length = 0;
+    EDIT.placed = []; EDIT.sel = null; if (editRing) editRing.visible = false;
+    editSave({ force: true });                                    // sauve la carte VIDE
+  };
   edPanel.querySelector('#edExport').onclick = () => { const s = JSON.stringify(editSerialize()); if (navigator.clipboard) navigator.clipboard.writeText(s); window.prompt('Placement (copié) :', s); };
 
   const edBtn = document.createElement('button'); edBtn.textContent = '🛠️'; edBtn.title = 'Éditeur (touche E)';
@@ -1687,8 +1695,9 @@
     if (e.code === 'KeyW' || e.code === 'KeyS' || e.code === 'KeyA' || e.code === 'KeyD') { EDIT.hold[e.code] = true; e.preventDefault(); return; }
     if (e.code === 'Space') { EDIT.space = true; e.preventDefault(); return; }   // Espace maintenu = outil main (Photoshop)
     if (EDIT.sel) {   // objet sélectionné : flèches = TOURNER (G/D, les 2 sens) et TAILLE (H/B)
-      if (e.code === 'ArrowLeft')  { EDIT.sel.mesh.rotation.y -= Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
-      if (e.code === 'ArrowRight') { EDIT.sel.mesh.rotation.y += Math.PI / 24; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
+      { const step = (EDIT.sel.type === 'crossroad' || EDIT.sel.type === 'zone') ? Math.PI / 2 : Math.PI / 24;   // routes/zones : rotation à 90° (droites)
+        if (e.code === 'ArrowLeft')  { EDIT.sel.mesh.rotation.y -= step; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; }
+        if (e.code === 'ArrowRight') { EDIT.sel.mesh.rotation.y += step; editSelect(EDIT.sel); editSave(); e.preventDefault(); return; } }
       if (e.code === 'ArrowUp')    { EDIT.sel.scale *= 1.05; editReground(EDIT.sel); editSave(); e.preventDefault(); return; }
       if (e.code === 'ArrowDown')  { EDIT.sel.scale *= 0.95; editReground(EDIT.sel); editSave(); e.preventDefault(); return; }
       if (e.code === 'KeyR') { EDIT.sel.mesh.rotation.y += Math.PI / 12; editSelect(EDIT.sel); editSave(); return; }
