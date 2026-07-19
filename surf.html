@@ -769,12 +769,12 @@
       const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(ROAD.len / 1.5, 1); t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t;
     }
     roadTex = makeAsphaltTex();
-    roadMesh = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.len, ROAD.w), new THREE.MeshStandardMaterial({ map: roadTex, roughness: 1, metalness: 0 }));
+    roadMesh = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.len, ROAD.w), new THREE.MeshBasicMaterial({ map: roadTex }));   // unlit (même rendu plat que le décor)
     roadMesh.rotation.x = -Math.PI / 2; roadMesh.position.set(0, 0.012, ROAD.z); scene.add(roadMesh);   // juste au-dessus de l'herbe
     const sideTex = makeSideTex();
     for (const sgn of [-1, 1]) {
       const zc = ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);
-      const s = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.len, ROAD.sideW), new THREE.MeshStandardMaterial({ map: sideTex, roughness: 1, metalness: 0 }));
+      const s = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.len, ROAD.sideW), new THREE.MeshBasicMaterial({ map: sideTex }));   // unlit → même couleur que les trottoirs transversale/carrefour
       s.rotation.x = -Math.PI / 2; s.position.set(0, 0.014, zc); scene.add(s); sideMeshes.push(s);   // trottoir PLAT (croisements propres)
       walkPlatforms.push({ x0: -ROAD.len / 2, x1: ROAD.len / 2, z0: zc - ROAD.sideW / 2, z1: zc + ROAD.sideW / 2, h: 0 });
     }
