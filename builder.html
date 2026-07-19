@@ -178,7 +178,7 @@ const gridHelper = new THREE.GridHelper(T * 40, 40, 0x88b0d0, 0x9ec4de); gridHel
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.0));   // (au cas où un asset resterait lit)
 
 let ghost = null;
-function makeGhost() { if (ghost) scene.remove(ghost); ghost = ASSET[curType].clone(true); ghost.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.5; o.material.depthWrite = false; } }); scene.add(ghost); }
+function makeGhost() { if (ghost) { scene.remove(ghost); ghost = null; } if (!curType) return; ghost = ASSET[curType].clone(true); ghost.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.5; o.material.depthWrite = false; } }); scene.add(ghost); }
 makeGhost();
 
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane0 = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit = new THREE.Vector3();
@@ -191,8 +191,8 @@ function cellUnder(e) {
   return { gx: Math.round(hit.x / T), gz: Math.round(hit.z / T) };
 }
 function updateGhost(e) {
-  const c = cellUnder(e); hoverG = c; if (!c) { if (ghost) ghost.visible = false; return; }
-  if (eraseMode) { ghost.visible = false; return; }
+  const c = cellUnder(e); hoverG = c;
+  if (!ghost || !curType || eraseMode || !c) { if (ghost) ghost.visible = false; return; }
   ghost.visible = true; ghost.position.set(c.gx * T, 0.03, c.gz * T); ghost.rotation.y = curRot * Math.PI / 2;
 }
 
@@ -202,7 +202,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => { downXY = { x: e.cli
 renderer.domElement.addEventListener('pointermove', (e) => { if (downXY && Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y) > 6) dragged = true; updateGhost(e); });
 renderer.domElement.addEventListener('pointerup', (e) => {
   const c = cellUnder(e);
-  if (!dragged && c && e.button === 0) { if (eraseMode) removeTile(c.gx, c.gz); else placeTile(c.gx, c.gz, curType, curRot); refresh(); scheduleSave(); }
+  if (!dragged && c && e.button === 0 && (eraseMode || curType)) { if (eraseMode) removeTile(c.gx, c.gz); else placeTile(c.gx, c.gz, curType, curRot); refresh(); scheduleSave(); }
   downXY = null;
 });
 renderer.domElement.addEventListener('contextmenu', (e) => { e.preventDefault(); const c = cellUnder(e); if (c) { removeTile(c.gx, c.gz); refresh(); scheduleSave(); } });
@@ -210,7 +210,7 @@ addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') { curRo
 
 // ---------- UI ----------
 const pal = document.getElementById('pal');
-for (const k in TILES) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = TILES[k].label; b.dataset.t = k; b.onclick = () => { curType = k; eraseMode = false; makeGhost(); highlight(); }; pal.appendChild(b); }
+for (const k in TILES) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = TILES[k].label; b.dataset.t = k; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; pal.appendChild(b); }   // re-clic sur le bouton actif = désélection (la souris ne pose plus rien)
 function highlight() { for (const b of pal.querySelectorAll('button')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; }
 document.getElementById('rotate').onclick = () => { curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°'; };
 document.getElementById('erase').onclick = () => { eraseMode = !eraseMode; if (ghost) ghost.visible = false; highlight(); };
