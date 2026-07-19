@@ -677,9 +677,7 @@
   const coins = [];
   new GLTFLoader().load('models/coin.glb?v=1', function (gltf) {
     const base = gltf.scene;
-    base.traverse(function (o) {
-      if (o.isMesh && o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if (mt) { mt.metalness = 0.25; mt.roughness = 0.35; mt.emissive = new THREE.Color(0x4a3200); mt.emissiveIntensity = 0.35; mt.side = THREE.DoubleSide; } }); }
-    });
+    unlit(base);   // pièces en unlit (or bien brillant, léger)
     const S = 0.34, lanes = [-1.5, 0, 1.5], spots = [];
     let li = 0;
     for (let x = -50; x <= 52; x += 3.4) {                    // arcs de 3 pièces (monte→descend) sur tout le parcours allongé
@@ -920,14 +918,14 @@
     v.speed = 5 + Math.random() * 4;
   }
   new GLTFLoader().load('models/car.glb', function (gltf) {
-    const base = gltf.scene; dside(base);
+    const base = gltf.scene; dside(base); unlit(base);
     assetBase.car = base;                                // palette (pristine) → tu règles la taille toi-même
     carBaseBox = new THREE.Box3().setFromObject(base);
     for (let i = 0; i < 5; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); const v = { mesh: m, box: carBaseBox, kind: 'car', scale: trafficScale }; cars.push(v); vehDims(v); }
     for (let i = 0; i < cars.length; i++) if (cars[i].kind === 'car') respawnCar(cars[i], hero.position.x + 12 + i * 16);
   });
   new GLTFLoader().load('models/bus.glb', function (gltf) {
-    const base = gltf.scene; dside(base);
+    const base = gltf.scene; dside(base); unlit(base);
     assetBase.bus = base;                                // dispo aussi dans l'éditeur
     busBaseBox = new THREE.Box3().setFromObject(base);
     for (let i = 0; i < 2; i++) { const m = base.clone(true); m.rotation.y = BUS_MODEL_YAW; scene.add(m); const v = { mesh: m, box: busBaseBox, kind: 'bus', scale: busScale }; cars.push(v); vehDims(v); respawnCar(v, hero.position.x + 45 + i * 35); }
