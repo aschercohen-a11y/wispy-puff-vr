@@ -233,7 +233,7 @@
   // Stockage partagé PC↔casque (table DÉDIÉE, ne touche pas aux données de l'app)
   const SB_URL = 'https://supabase-api.swipego.app';
   const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
-  const ROAD = { z: 0, len: 220, w: 6, sideW: 3.2, sideH: 0.22 };   // route LONGUE (plateau city-builder) ; chaussée w6 ; trottoirs 3.2
+  const ROAD = { z: 0, len: 220, w: 6, sideW: 3.2, sideH: 0.014 };   // route LONGUE (plateau city-builder) ; chaussée w6 ; trottoirs 3.2
   ROAD.halfSpan = ROAD.w / 2 + ROAD.sideW;    // demi-largeur route + trottoirs
   function onRoad(x, z) { return Math.abs(x) <= ROAD.len / 2 && z >= ROAD.z - ROAD.halfSpan && z <= ROAD.z + ROAD.halfSpan; }
   function tryJump() {
@@ -758,9 +758,9 @@
     const sideTex = makeSideTex();
     for (const sgn of [-1, 1]) {
       const zc = ROAD.z + sgn * (ROAD.w / 2 + ROAD.sideW / 2);
-      const s = new THREE.Mesh(new THREE.BoxGeometry(ROAD.len, ROAD.sideH, ROAD.sideW), new THREE.MeshStandardMaterial({ map: sideTex, roughness: 1, metalness: 0 }));
-      s.position.set(0, ROAD.sideH / 2, zc); scene.add(s);
-      walkPlatforms.push({ x0: -ROAD.len / 2, x1: ROAD.len / 2, z0: zc - ROAD.sideW / 2, z1: zc + ROAD.sideW / 2, h: ROAD.sideH });   // trottoir = plateforme montable
+      const s = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.len, ROAD.sideW), new THREE.MeshStandardMaterial({ map: sideTex, roughness: 1, metalness: 0 }));
+      s.rotation.x = -Math.PI / 2; s.position.set(0, 0.014, zc); scene.add(s);   // trottoir PLAT (croisements propres)
+      walkPlatforms.push({ x0: -ROAD.len / 2, x1: ROAD.len / 2, z0: zc - ROAD.sideW / 2, z1: zc + ROAD.sideW / 2, h: 0 });
     }
   }
 
@@ -843,6 +843,18 @@
     const b = new THREE.Mesh(new THREE.PlaneGeometry(T, T), new THREE.MeshBasicMaterial({ color: 0x4f7a3a, wireframe: true }));   // léger contour pour voir les tuiles
     b.rotation.x = -Math.PI / 2; b.position.y = 0.006; grp.add(b);
     assetBase.zone = grp;
+  }
+
+  // --- CARREFOUR (tuile) : croisement 4 voies + trottoirs aux 4 coins, en UN bloc propre ---
+  {
+    const grp = new THREE.Group(), ARM = 6, HALF = 6.2, cw = HALF - ARM / 2;   // bras = largeur route ; coins = trottoirs
+    const asph = new THREE.MeshBasicMaterial({ color: 0x555a63 }), side = new THREE.MeshBasicMaterial({ color: 0xc3bcaa }), line = new THREE.MeshBasicMaterial({ color: 0xf2e7c4 });
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const c = new THREE.Mesh(new THREE.PlaneGeometry(cw, cw), side); c.rotation.x = -Math.PI / 2; c.position.set(sx * (ARM / 2 + cw / 2), 0.016, sz * (ARM / 2 + cw / 2)); grp.add(c); }   // 4 trottoirs de coin
+    const hArm = new THREE.Mesh(new THREE.PlaneGeometry(HALF * 2, ARM), asph); hArm.rotation.x = -Math.PI / 2; hArm.position.y = 0.02; grp.add(hArm);
+    const vArm = new THREE.Mesh(new THREE.PlaneGeometry(ARM, HALF * 2), asph); vArm.rotation.x = -Math.PI / 2; vArm.position.y = 0.02; grp.add(vArm);
+    const mkd = (w, h, x, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), line); m.rotation.x = -Math.PI / 2; m.position.set(x, 0.022, z); return m; };
+    for (const off of [-1, 1]) for (let d = ARM / 2 + 1; d < HALF - 0.2; d += 2) { grp.add(mkd(1.1, 0.15, d, off)); grp.add(mkd(1.1, 0.15, -d, off)); grp.add(mkd(0.15, 1.1, off, d)); grp.add(mkd(0.15, 1.1, off, -d)); }   // pointillés sur les 4 bras
+    assetBase.carrefour = grp;
   }
 
   // --- FONTAINE : modèle pierre (Meshy) + EAU ANIMÉE par-dessus (jet central + 4 cascades + ondulations) ---
@@ -1460,6 +1472,7 @@
     crosswalk:{ label: '🦓 Passage piéton',  s: 1.0 },
     crossroad:{ label: '🛣️ Route transversale', s: 1.0 },
     zone:     { label: '🟩 Zone (sol)',      s: 1.0 },
+    carrefour:{ label: '➕ Carrefour',       s: 1.0 },
     fountain: { label: '⛲ Fontaine',        s: 2.2 },
   };
   const _eray = new THREE.Raycaster(), _emouse = new THREE.Vector2(), _eplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _ehit = new THREE.Vector3();
@@ -1505,7 +1518,7 @@
     return rec;
   }
   // masque les brins d'herbe sous les objets de sol posés (dalle, passage piéton, allée)
-  const GROUND_TYPES = { paving: true, crosswalk: true, path: true, crossroad: true, zone: true };
+  const GROUND_TYPES = { paving: true, crosswalk: true, path: true, crossroad: true, zone: true, carrefour: true };
   const _zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
   function applyGroundMask() {
     if (!grassMesh || !grassOrig) return;
