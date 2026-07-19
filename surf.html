@@ -1649,9 +1649,9 @@
   edPanel.querySelector('#edExport').onclick = () => { const s = JSON.stringify(editSerialize()); if (navigator.clipboard) navigator.clipboard.writeText(s); window.prompt('Placement (copié) :', s); };
 
   const edBtn = document.createElement('button'); edBtn.textContent = '🛠️'; edBtn.title = 'Éditeur (touche E)';
-  edBtn.style.cssText = 'position:fixed;top:12px;left:12px;z-index:50;width:44px;height:44px;border-radius:10px;border:2px solid #6fd;background:rgba(12,22,42,.85);color:#dff;font-size:20px;cursor:pointer;';
+  edBtn.style.cssText = 'position:fixed;top:12px;left:12px;z-index:50;width:44px;height:44px;border-radius:10px;border:2px solid #6fd;background:rgba(12,22,42,.85);color:#dff;font-size:20px;cursor:pointer;display:none;';
   edBtn.onclick = toggleEdit;
-  document.body.appendChild(edBtn);
+  // SURF = JEU : l'éditeur reste caché (on édite sur la racine wispyvr.swipego.app/). document.body.appendChild(edBtn) volontairement omis.
   function toggleEdit() {
     EDIT.on = !EDIT.on;
     edPanel.style.display = EDIT.on ? 'block' : 'none';
@@ -1661,7 +1661,7 @@
     if (!EDIT.on) editSave();
   }
   addEventListener('keydown', (e) => {
-    if (e.code === 'KeyE' && !e.repeat) { toggleEdit(); return; }
+    // touche E désactivée sur surf.html (jeu) — on édite sur la racine wispyvr.swipego.app/
     if (!EDIT.on) return;
     // PAN caméra : WASD MAINTENUS = déplacement continu (appliqué dans updateEditorCam)
     if (e.code === 'KeyW' || e.code === 'KeyS' || e.code === 'KeyA' || e.code === 'KeyD') { EDIT.hold[e.code] = true; e.preventDefault(); return; }
