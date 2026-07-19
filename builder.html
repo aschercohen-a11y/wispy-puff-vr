@@ -47,6 +47,7 @@
   <div class="grp">
     <div class="lbl">Outils</div>
     <button id="rotate" class="act">🔄 Tourner (R) — <span id="rotVal">0°</span></button>
+    <button id="move" class="act">✋ Déplacer un objet</button>
     <div class="row2"><button id="erase" class="act" style="flex:1">🧹 Gomme</button><button id="clear" class="warn" style="flex:1">🗑️ Vider</button></div>
     <button id="view" class="act">🗺️ Vue 2D (plan)</button>
   </div>
@@ -214,7 +215,7 @@ const PAIRED = { lamp: true };     // objets posés en PAIRE (un de chaque côt�
 const objOff = { lamp: 5 };        // écart à l'axe de la route pour les paires (5 = milieu trottoir ; 3.2 ≈ bord route ; 6.6 ≈ bord extérieur)
 function offFor(t) { return objOff[t] != null ? objOff[t] : 5; }
 const worldGroup = new THREE.Group(); scene.add(worldGroup);
-let curType = 'route', curRot = 0, eraseMode = false;
+let curType = 'route', curRot = 0, eraseMode = false, moveMode = false, grabbed = null;
 
 function key(gx, gz) { return gx + '_' + gz; }
 function placeTile(gx, gz, type, rot) {
@@ -266,19 +267,33 @@ function cellUnder(e) {
   if (!ray.ray.intersectPlane(plane0, hit)) return null;
   return { gx: Math.round(hit.x / T), gz: Math.round(hit.z / T) };
 }
+function worldPoint(e) {   // point du sol sous le curseur (non arrondi) pour déplacer librement
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, cam);
+  return ray.ray.intersectPlane(plane0, hit) ? { x: hit.x, z: hit.z } : null;
+}
 function updateGhost(e) {
   const c = cellUnder(e); hoverG = c;
-  if (!ghost || !curType || eraseMode || !c) { if (ghost) ghost.visible = false; return; }
+  if (!ghost || !curType || eraseMode || moveMode || !c) { if (ghost) ghost.visible = false; return; }
   ghost.visible = true; ghost.position.set(c.gx * T, 0.03, c.gz * T); ghost.rotation.y = curRot * Math.PI / 2;
 }
 
 // ---------- Interaction ----------
 let dragged = false, downXY = null;
-renderer.domElement.addEventListener('pointerdown', (e) => { downXY = { x: e.clientX, y: e.clientY }; dragged = false; });
-renderer.domElement.addEventListener('pointermove', (e) => { if (downXY && Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y) > 6) dragged = true; updateGhost(e); });
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  downXY = { x: e.clientX, y: e.clientY }; dragged = false;
+  if (moveMode && e.button === 0) { const id = pickObject(e); if (id != null) { grabbed = objects.get(id); ctr.enabled = false; } }   // attrape l'objet sous le curseur (bloque la caméra le temps du glissé)
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (downXY && Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y) > 6) dragged = true;
+  if (grabbed) { const w = worldPoint(e); if (w) { grabbed.ox = w.x - grabbed.gx * T; grabbed.oz = w.z - grabbed.gz * T; grabbed.mesh.position.set(w.x, 0.03, w.z); } return; }   // glisse l'objet où pointe la souris
+  updateGhost(e);
+});
 renderer.domElement.addEventListener('pointerup', (e) => {
+  if (grabbed) { grabbed = null; ctr.enabled = true; scheduleSave(); downXY = null; return; }   // fin du déplacement
   const c = cellUnder(e);
-  if (!dragged && c) {
+  if (!moveMode && !dragged && c) {
     if (e.button === 2) { eraseAt(e, c.gx, c.gz); refresh(); scheduleSave(); }   // clic droit SANS glisser = supprimer l'objet/le bloc sous le curseur (2D et 3D)
     else if (e.button === 0 && (eraseMode || curType)) {
       if (eraseMode) eraseAt(e, c.gx, c.gz);
@@ -302,7 +317,7 @@ for (const cat of CATS) {
   for (const k in cat.items) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = cat.items[k].label; b.dataset.t = k; if (cat.items === HOUSES && !OBJ_ASSET[k]) b.disabled = true; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; body.appendChild(b); }
   wrap.appendChild(head); wrap.appendChild(body); pal.appendChild(wrap);
 }
-function highlight() { for (const b of pal.querySelectorAll('button.tile')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; updateSizeCtl(); }
+function highlight() { for (const b of pal.querySelectorAll('button.tile')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; updateSizeCtl(); updateModeBtns(); }
 function updateSizeCtl() {
   const el = document.getElementById('sizeCtl'); const isObj = !eraseMode && curType && kindOf(curType) === 'object';
   el.style.display = isObj ? 'block' : 'none'; if (isObj) document.getElementById('szV').textContent = Math.round(scaleFor(curType) * 100) + '%';
@@ -317,7 +332,9 @@ document.getElementById('szP').onclick = () => bumpScale(1.18);
 document.getElementById('offM').onclick = () => bumpOffset(-0.6);
 document.getElementById('offP').onclick = () => bumpOffset(0.6);
 document.getElementById('rotate').onclick = () => { curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°'; };
-document.getElementById('erase').onclick = () => { eraseMode = !eraseMode; if (ghost) ghost.visible = false; highlight(); };
+document.getElementById('erase').onclick = () => { eraseMode = !eraseMode; if (eraseMode) moveMode = false; if (ghost) ghost.visible = false; highlight(); };
+document.getElementById('move').onclick = () => { moveMode = !moveMode; if (moveMode) { eraseMode = false; curType = null; } if (ghost) ghost.visible = false; highlight(); };
+function updateModeBtns() { const mv = document.getElementById('move'); mv.style.background = moveMode ? '#36e0d0' : ''; mv.style.color = moveMode ? '#023' : '#fff'; }
 document.getElementById('clear').onclick = () => { if (confirm('Vider toute la carte ?')) { clearAll(); scheduleSave(); } };
 document.getElementById('view').onclick = () => {
   const to2d = (cam === cam3);
