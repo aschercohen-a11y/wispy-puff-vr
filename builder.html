@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta http-equiv="Cache-Control" content="no-store" />
+<title>Wispy — Constructeur LEGO</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #bfe0f6; font-family: 'Trebuchet MS', sans-serif; -webkit-user-select: none; user-select: none; touch-action: none; }
+  #panel { position: fixed; top: 8px; left: 8px; z-index: 50; background: rgba(12,22,42,.94); border: 2px solid #6fd; border-radius: 12px; padding: 10px; color: #dff; width: 208px; max-height: calc(100vh - 16px); overflow-y: auto; }
+  #panel h3 { margin: 0 0 4px; font-size: 15px; }
+  #panel small { opacity: .8; font-size: 11px; line-height: 1.3; display: block; margin-bottom: 6px; }
+  .grp { border-top: 1px solid #345; margin-top: 8px; padding-top: 8px; }
+  .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; opacity: .6; margin-bottom: 4px; }
+  button { display: block; width: 100%; box-sizing: border-box; padding: 8px; margin: 4px 0; border: 0; border-radius: 7px; background: rgba(50,80,120,.55); color: #dff; font-weight: bold; cursor: pointer; font-size: 13px; text-align: left; }
+  button.tile.on { background: #36e0d0; color: #023; }
+  button.act { background: #2f7bd6; color: #fff; text-align: center; }
+  button.warn { background: #d6553f; color: #fff; text-align: center; }
+  .row2 { display: flex; gap: 5px; }
+  .row2 button { margin: 4px 0; }
+  #hud { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 50; background: rgba(12,22,42,.85); color: #cff; padding: 6px 14px; border-radius: 20px; font-size: 12px; }
+  #toast { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 60; background: #123; color: #6fd; padding: 8px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="panel">
+  <h3>🧱 Constructeur LEGO</h3>
+  <small>Clique une tuile, puis clique sur la grille pour la poser. Elle s'aimante toute seule.</small>
+  <div class="lbl">Tuiles</div>
+  <div id="pal"></div>
+  <div class="grp">
+    <div class="lbl">Outils</div>
+    <button id="rotate" class="act">🔄 Tourner (R) — <span id="rotVal">0°</span></button>
+    <div class="row2"><button id="erase" class="act" style="flex:1">🧹 Gomme</button><button id="clear" class="warn" style="flex:1">🗑️ Vider</button></div>
+    <button id="view" class="act">🗺️ Vue 2D (plan)</button>
+  </div>
+  <div class="grp">
+    <button id="save" class="act">💾 Sauvegarder</button>
+  </div>
+</div>
+<div id="hud">Tuiles : <b id="count">0</b> · clic gauche = poser · clic droit = effacer · molette = zoom</div>
+<div id="toast"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from './vendor/controls/OrbitControls.js';
+
+const SB_URL = 'https://supabase-api.swipego.app';
+const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
+const LAYOUT_ID = 2;   // id=2 = carte LEGO (id=1 = ancien village, préservé)
+
+// ---------- Scène ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe0f6);
+scene.fog = new THREE.Fog(0xbfe0f6, 140, 340);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+document.body.appendChild(renderer.domElement);
+
+// caméra 3D (orbite) + caméra 2D (plan de dessus)
+const cam3 = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.5, 1000);
+cam3.position.set(28, 30, 34);
+const VZ = 60;
+const cam2 = new THREE.OrthographicCamera(-VZ, VZ, VZ * innerHeight / innerWidth, -VZ * innerHeight / innerWidth, 0.1, 800);
+cam2.position.set(0, 200, 0); cam2.lookAt(0, 0, 0);
+let cam = cam3;
+
+const ctr3 = new OrbitControls(cam3, renderer.domElement);
+ctr3.enableDamping = true; ctr3.maxPolarAngle = Math.PI * 0.49; ctr3.target.set(0, 0, 0);
+const ctr2 = new OrbitControls(cam2, renderer.domElement);
+ctr2.enableRotate = false; ctr2.enableDamping = true; ctr2.screenSpacePanning = false;
+ctr2.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+ctr2.enabled = false;
+let ctr = ctr3;
+
+addEventListener('resize', () => {
+  cam3.aspect = innerWidth / innerHeight; cam3.updateProjectionMatrix();
+  cam2.left = -VZ; cam2.right = VZ; cam2.top = VZ * innerHeight / innerWidth; cam2.bottom = -VZ * innerHeight / innerWidth; cam2.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---------- Textures partagées (unlit / flat cartoon) ----------
+function tex(fn, rep) { const t = new THREE.CanvasTexture(fn()); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; if (rep) t.repeat.set(rep[0], rep[1]); return t; }
+const GRASS_TEX = tex(() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'); x.fillStyle = '#6f9d52'; x.fillRect(0, 0, 64, 64); for (let i = 0; i < 90; i++) { x.fillStyle = ['#659149', '#79a95c', '#5f8a45'][i % 3]; x.fillRect(Math.random() * 64, Math.random() * 64, 2, 3); } return c; });
+const TILE_TEX_SRC = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'); x.fillStyle = '#c3bcaa'; x.fillRect(0, 0, 128, 128); x.strokeStyle = 'rgba(120,114,102,0.6)'; x.lineWidth = 4; for (let i = 0; i <= 128; i += 32) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); } return c; })();
+function tileTex(rep) { const t = new THREE.CanvasTexture(TILE_TEX_SRC); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); return t; }
+const ASPH = new THREE.MeshBasicMaterial({ color: 0x555a63 });
+const LINE = new THREE.MeshBasicMaterial({ color: 0xf2e7c4 });
+const EDGE = new THREE.MeshBasicMaterial({ color: 0xe9e4d2 });
+
+// ---------- Dimensions d'une tuile ----------
+const T = 14, ROAD_W = 6, SIDE_W = 3.2, HALF = T / 2;   // 6 route + 2×3.2 trottoir + 2×0.8 herbe = 14
+const SIDE_Z = ROAD_W / 2 + SIDE_W / 2;                  // centre trottoir = 4.6
+
+function plane(w, h, mat, y, x, z) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.rotation.x = -Math.PI / 2; m.position.set(x || 0, y, z || 0); return m; }
+function sidewalk(w, h, x, z) { const m = plane(w, h, new THREE.MeshBasicMaterial({ map: tileTex(1) }), 0.014, x, z); m.material.map.repeat.set(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2))); return m; }
+function freshGrass() { const g = plane(T, T, new THREE.MeshBasicMaterial({ map: GRASS_TEX.clone() }), 0.002); g.material.map.repeat.set(4, 4); return g; }
+
+// ---------- Constructeurs de tuiles (chaque tuile = groupe 14×14, centré, unlit) ----------
+function buildRoute() {
+  const g = new THREE.Group(); g.add(freshGrass());
+  g.add(plane(T, ROAD_W, ASPH, 0.02));                                   // chaussée le long de X
+  for (const s of [-1, 1]) g.add(sidewalk(T, SIDE_W, 0, s * SIDE_Z));    // 2 trottoirs
+  for (const s of [-1, 1]) { const e = plane(T, 0.18, EDGE, 0.021); e.position.z = s * (ROAD_W / 2 - 0.2); g.add(e); }  // bords blancs
+  for (let x = -HALF + 1; x < HALF; x += 2.5) { const d = plane(1.2, 0.16, LINE, 0.022); d.position.x = x; g.add(d); }  // pointillé central
+  return g;
+}
+function buildPrairie() {
+  const g = new THREE.Group(); g.add(freshGrass());
+  const b = plane(T, T, new THREE.MeshBasicMaterial({ color: 0x4f7a3a, wireframe: true }), 0.006); g.add(b);   // léger liseré (repère de tuile)
+  return g;
+}
+function buildCarrefour() {
+  const g = new THREE.Group(); g.add(freshGrass());
+  g.add(plane(T, ROAD_W, ASPH, 0.02));                                   // bras horizontal
+  g.add(plane(ROAD_W, T, ASPH, 0.02));                                   // bras vertical
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(sidewalk(SIDE_W, SIDE_W, sx * SIDE_Z, sz * SIDE_Z));   // 4 trottoirs de coin
+  for (const off of [-1, 1]) for (let d = ROAD_W / 2 + 1; d < HALF; d += 2) {   // pointillés sur les 4 bras
+    g.add(plane(1.1, 0.15, LINE, 0.023, d, off)); g.add(plane(1.1, 0.15, LINE, 0.023, -d, off));
+    g.add(plane(0.15, 1.1, LINE, 0.023, off, d)); g.add(plane(0.15, 1.1, LINE, 0.023, off, -d));
+  }
+  return g;
+}
+function buildVirage() {   // route qui tourne : arrive de -X, repart vers +Z
+  const g = new THREE.Group(); g.add(freshGrass());
+  const seg = HALF - ROAD_W / 2, segC = ROAD_W / 2 + seg / 2;             // 4 ; 5
+  g.add(plane(HALF, ROAD_W, ASPH, 0.02, -HALF / 2, 0));                   // demi-bras gauche (x∈[-7,0])
+  g.add(plane(ROAD_W, HALF, ASPH, 0.02, 0, HALF / 2));                    // demi-bras haut  (z∈[0,7])
+  g.add(plane(ROAD_W, ROAD_W, ASPH, 0.021));                             // carré central
+  // trottoirs extérieurs (L convexe, coin bas-droit)
+  g.add(sidewalk(HALF, SIDE_W, -HALF / 2, -SIDE_Z));                      // sous le bras gauche
+  g.add(sidewalk(SIDE_W, HALF, SIDE_Z, HALF / 2));                        // à droite du bras haut
+  g.add(sidewalk(SIDE_W, SIDE_W, SIDE_Z, -SIDE_Z));                       // coin extérieur bas-droit
+  // trottoirs intérieurs (L concave, coin haut-gauche)
+  g.add(sidewalk(seg, SIDE_W, -segC, SIDE_Z));                            // au-dessus du bras gauche (x∈[-7,-3])
+  g.add(sidewalk(SIDE_W, seg, -SIDE_Z, segC));                            // à gauche du bras haut  (z∈[3,7])
+  return g;
+}
+function buildTe() {   // embranchement en T : route horizontale complète + un bras vers +Z
+  const g = new THREE.Group(); g.add(freshGrass());
+  const seg = HALF - ROAD_W / 2, segC = ROAD_W / 2 + seg / 2;             // 4 ; 5
+  g.add(plane(T, ROAD_W, ASPH, 0.02));                                   // route horizontale complète
+  g.add(plane(ROAD_W, HALF, ASPH, 0.02, 0, HALF / 2));                    // bras vertical (haut)
+  g.add(sidewalk(T, SIDE_W, 0, -SIDE_Z));                                 // trottoir bas continu
+  g.add(sidewalk(seg, SIDE_W, -segC, SIDE_Z)); g.add(sidewalk(seg, SIDE_W, segC, SIDE_Z));   // trottoir haut (2 segments, de part et d'autre du bras)
+  g.add(sidewalk(SIDE_W, seg, -SIDE_Z, segC)); g.add(sidewalk(SIDE_W, seg, SIDE_Z, segC));   // bords gauche/droit du bras vertical
+  return g;
+}
+
+const TILES = {
+  route:     { label: '🛣️ Route droite', build: buildRoute },
+  carrefour: { label: '➕ Carrefour',     build: buildCarrefour },
+  prairie:   { label: '🌳 Prairie',       build: buildPrairie },
+  // virage/Té : à finaliser prochainement (buildVirage / buildTe prêts mais pas encore assez propres)
+};
+const ASSET = {};
+for (const k in TILES) ASSET[k] = TILES[k].build();
+
+// ---------- État de la carte ----------
+const grid = new Map();   // "gx_gz" -> { type, rot, mesh }
+const worldGroup = new THREE.Group(); scene.add(worldGroup);
+let curType = 'route', curRot = 0, eraseMode = false;
+
+function key(gx, gz) { return gx + '_' + gz; }
+function placeTile(gx, gz, type, rot) {
+  removeTile(gx, gz);
+  const mesh = ASSET[type].clone(true);
+  mesh.position.set(gx * T, 0, gz * T); mesh.rotation.y = rot * Math.PI / 2;
+  worldGroup.add(mesh); grid.set(key(gx, gz), { type, rot, mesh });
+}
+function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { worldGroup.remove(e.mesh); grid.delete(key(gx, gz)); } }
+function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); grid.clear(); refresh(); }
+
+// ---------- Grille de repère + fantôme ----------
+const gridHelper = new THREE.GridHelper(T * 40, 40, 0x88b0d0, 0x9ec4de); gridHelper.position.y = 0.001; gridHelper.material.opacity = 0.35; gridHelper.material.transparent = true; scene.add(gridHelper);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.0));   // (au cas où un asset resterait lit)
+
+let ghost = null;
+function makeGhost() { if (ghost) scene.remove(ghost); ghost = ASSET[curType].clone(true); ghost.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.5; o.material.depthWrite = false; } }); scene.add(ghost); }
+makeGhost();
+
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane0 = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit = new THREE.Vector3();
+let hoverG = null;
+function cellUnder(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, cam);
+  if (!ray.ray.intersectPlane(plane0, hit)) return null;
+  return { gx: Math.round(hit.x / T), gz: Math.round(hit.z / T) };
+}
+function updateGhost(e) {
+  const c = cellUnder(e); hoverG = c; if (!c) { if (ghost) ghost.visible = false; return; }
+  if (eraseMode) { ghost.visible = false; return; }
+  ghost.visible = true; ghost.position.set(c.gx * T, 0.03, c.gz * T); ghost.rotation.y = curRot * Math.PI / 2;
+}
+
+// ---------- Interaction ----------
+let dragged = false, downXY = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { downXY = { x: e.clientX, y: e.clientY }; dragged = false; });
+renderer.domElement.addEventListener('pointermove', (e) => { if (downXY && Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y) > 6) dragged = true; updateGhost(e); });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const c = cellUnder(e);
+  if (!dragged && c && e.button === 0) { if (eraseMode) removeTile(c.gx, c.gz); else placeTile(c.gx, c.gz, curType, curRot); refresh(); scheduleSave(); }
+  downXY = null;
+});
+renderer.domElement.addEventListener('contextmenu', (e) => { e.preventDefault(); const c = cellUnder(e); if (c) { removeTile(c.gx, c.gz); refresh(); scheduleSave(); } });
+addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') { curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°'; } });
+
+// ---------- UI ----------
+const pal = document.getElementById('pal');
+for (const k in TILES) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = TILES[k].label; b.dataset.t = k; b.onclick = () => { curType = k; eraseMode = false; makeGhost(); highlight(); }; pal.appendChild(b); }
+function highlight() { for (const b of pal.querySelectorAll('button')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; }
+document.getElementById('rotate').onclick = () => { curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°'; };
+document.getElementById('erase').onclick = () => { eraseMode = !eraseMode; if (ghost) ghost.visible = false; highlight(); };
+document.getElementById('clear').onclick = () => { if (confirm('Vider toute la carte ?')) { clearAll(); scheduleSave(); } };
+document.getElementById('view').onclick = () => {
+  const to2d = (cam === cam3);
+  cam = to2d ? cam2 : cam3; ctr = to2d ? ctr2 : ctr3; ctr3.enabled = !to2d; ctr2.enabled = to2d;
+  document.getElementById('view').textContent = to2d ? '🎥 Vue 3D' : '🗺️ Vue 2D (plan)';
+};
+document.getElementById('save').onclick = () => saveNow(true);
+function refresh() { document.getElementById('count').textContent = grid.size; }
+highlight(); refresh();
+
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.opacity = 1; setTimeout(() => t.style.opacity = 0, 1600); }
+
+// ---------- Sauvegarde / chargement (Supabase, id=2) ----------
+let saveT = null;
+function scheduleSave() { clearTimeout(saveT); saveT = setTimeout(() => saveNow(false), 900); }
+function serialize() { const tiles = []; for (const [k, e] of grid) { const [gx, gz] = k.split('_').map(Number); tiles.push({ gx, gz, type: e.type, rot: e.rot }); } return { tiles }; }
+async function saveNow(manual) {
+  const data = serialize();
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/wispy_layout', { method: 'POST', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ id: LAYOUT_ID, data }) });
+    if (manual) toast(r.ok ? '💾 Sauvegardé (' + data.tiles.length + ' tuiles)' : '⚠️ Erreur ' + r.status);
+  } catch (err) { if (manual) toast('⚠️ Hors ligne'); }
+  try { localStorage.setItem('wispy_tiles', JSON.stringify(data)); } catch (e) {}
+}
+async function load() {
+  let data = null;
+  try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.' + LAYOUT_ID + '&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); data = j && j[0] && j[0].data; } } catch (e) {}
+  if (!data) { try { data = JSON.parse(localStorage.getItem('wispy_tiles') || 'null'); } catch (e) {} }
+  if (data && data.tiles) { for (const t of data.tiles) if (ASSET[t.type]) placeTile(t.gx, t.gz, t.type, t.rot || 0); refresh(); }
+}
+load();
+
+// hook de test (inoffensif)
+window.__builder = { placeTile, refresh, cam3, ctr3 };
+
+// ---------- Boucle ----------
+renderer.setAnimationLoop(() => { ctr.update(); renderer.render(scene, cam); });
+</script>
+</body>
+</html>
