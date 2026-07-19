@@ -16,6 +16,12 @@
   button.tile.on { background: #36e0d0; color: #023; }
   button.act { background: #2f7bd6; color: #fff; text-align: center; }
   button.warn { background: #d6553f; color: #fff; text-align: center; }
+  button.tile:disabled { opacity: .4; cursor: default; }
+  .cat > .head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 8px; margin-top: 6px; background: rgba(60,92,134,.4); border-radius: 7px; font-weight: bold; font-size: 13px; }
+  .cat > .body { display: none; margin-top: 2px; }
+  .cat.open > .body { display: block; }
+  .cat > .head .arw { transition: transform .15s; opacity: .8; }
+  .cat.open > .head .arw { transform: rotate(90deg); }
   .row2 { display: flex; gap: 5px; }
   .row2 button { margin: 4px 0; }
   #hud { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 50; background: rgba(12,22,42,.85); color: #cff; padding: 6px 14px; border-radius: 20px; font-size: 12px; }
@@ -28,8 +34,7 @@
 <body>
 <div id="panel">
   <h3>🧱 Constructeur LEGO</h3>
-  <small>Clique une tuile, puis clique sur la grille pour la poser. Elle s'aimante toute seule.</small>
-  <div class="lbl">Tuiles</div>
+  <small>Choisis une rubrique, clique un élément, puis clique sur la grille. Ça s'aimante tout seul.</small>
   <div id="pal"></div>
   <div class="grp">
     <div class="lbl">Outils</div>
@@ -41,11 +46,12 @@
     <button id="save" class="act">💾 Sauvegarder</button>
   </div>
 </div>
-<div id="hud">Tuiles : <b id="count">0</b> · clic gauche = poser · clic droit = effacer · molette = zoom</div>
+<div id="hud">Posés : <b id="count">0</b> · clic gauche = poser · clic droit = effacer · molette = zoom · R = tourner</div>
 <div id="toast"></div>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/controls/OrbitControls.js';
+import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
 
 const SB_URL = 'https://supabase-api.swipego.app';
 const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
@@ -157,8 +163,29 @@ const TILES = {
 const ASSET = {};
 for (const k in TILES) ASSET[k] = TILES[k].build();
 
+// ---------- Maisons / déco (modèles GLB posés sur les prairies) ----------
+const HOUSES = {
+  house1:   { label: '🏡 Maison 1',      file: 'house1',          foot: 10 },
+  house2:   { label: '🏘️ Maison 2',      file: 'house2',          foot: 10 },
+  bakery:   { label: '🥐 Boulangerie',   file: 'house_bakery',    foot: 10 },
+  cottage:  { label: '🏠 Chaumière',     file: 'pp_cartoonhouse', foot: 9 },
+  carrot:   { label: '🥕 Maison carotte', file: 'carrot_meshy',   foot: 9 },
+  windmill: { label: '🌬️ Moulin',        file: 'windmill',        foot: 9 },
+  tree:     { label: '🌳 Arbre',         file: 'pp_tree',         foot: 5 },
+  lamp:     { label: '🏮 Lampadaire',    file: 'lamp',            foot: 2.4 },
+};
+const HOUSE_ASSET = {};
+function unlit(root) { root.traverse(m => { if (!m.isMesh || !m.material) return; const conv = (s) => { if (s.map) s.map.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshBasicMaterial({ map: s.map || null, color: s.map ? 0xffffff : (s.color ? s.color.clone() : new THREE.Color(0xffffff)), side: THREE.DoubleSide, transparent: !!s.transparent, opacity: s.opacity != null ? s.opacity : 1 }); }; m.material = Array.isArray(m.material) ? m.material.map(conv) : conv(m.material); }); }
+function fitObject(root, foot) { root.updateMatrixWorld(true); let b = new THREE.Box3().setFromObject(root); const w = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) || 1; root.scale.setScalar(foot / w); root.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(root); root.position.y = -b.min.y; const g = new THREE.Group(); g.add(root); return g; }
+const gltf = new GLTFLoader();
+for (const k in HOUSES) { const h = HOUSES[k]; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); HOUSE_ASSET[k] = fitObject(g.scene, h.foot || 9); const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) btn.disabled = false; placeReady(); }); }
+function kindOf(t) { return TILES[t] ? 'tile' : (HOUSES[t] ? 'house' : null); }
+function assetOf(t) { return TILES[t] ? ASSET[t] : HOUSE_ASSET[t]; }
+
 // ---------- État de la carte ----------
-const grid = new Map();   // "gx_gz" -> { type, rot, mesh }
+const grid = new Map();      // couche SOL : "gx_gz" -> { type, rot, mesh }
+const objects = new Map();   // couche OBJETS (maisons) posés par-dessus : "gx_gz" -> { type, rot, mesh }
+let pendingObjects = [];     // objets sauvegardés en attente que leur modèle soit chargé
 const worldGroup = new THREE.Group(); scene.add(worldGroup);
 let curType = 'route', curRot = 0, eraseMode = false;
 
@@ -170,14 +197,22 @@ function placeTile(gx, gz, type, rot) {
   worldGroup.add(mesh); grid.set(key(gx, gz), { type, rot, mesh });
 }
 function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { worldGroup.remove(e.mesh); grid.delete(key(gx, gz)); } }
-function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); grid.clear(); refresh(); }
+function placeObject(gx, gz, type, rot) {
+  removeObject(gx, gz); const a = HOUSE_ASSET[type]; if (!a) return;
+  const mesh = a.clone(true); mesh.position.set(gx * T, 0.03, gz * T); mesh.rotation.y = rot * Math.PI / 2;
+  worldGroup.add(mesh); objects.set(key(gx, gz), { type, rot, mesh });
+}
+function removeObject(gx, gz) { const e = objects.get(key(gx, gz)); if (e) { worldGroup.remove(e.mesh); objects.delete(key(gx, gz)); } }
+function eraseAt(gx, gz) { if (objects.has(key(gx, gz))) removeObject(gx, gz); else removeTile(gx, gz); }   // enlève d'abord la maison, sinon la tuile
+function placeReady() { pendingObjects = pendingObjects.filter(o => { if (HOUSE_ASSET[o.type]) { placeObject(o.gx, o.gz, o.type, o.rot || 0); return false; } return true; }); refresh(); }
+function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); for (const e of objects.values()) worldGroup.remove(e.mesh); grid.clear(); objects.clear(); pendingObjects = []; refresh(); }
 
 // ---------- Grille de repère + fantôme ----------
 const gridHelper = new THREE.GridHelper(T * 40, 40, 0x88b0d0, 0x9ec4de); gridHelper.position.y = 0.001; gridHelper.material.opacity = 0.35; gridHelper.material.transparent = true; scene.add(gridHelper);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.0));   // (au cas où un asset resterait lit)
 
 let ghost = null;
-function makeGhost() { if (ghost) { scene.remove(ghost); ghost = null; } if (!curType) return; ghost = ASSET[curType].clone(true); ghost.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.5; o.material.depthWrite = false; } }); scene.add(ghost); }
+function makeGhost() { if (ghost) { scene.remove(ghost); ghost = null; } const a = curType && assetOf(curType); if (!a) return; ghost = a.clone(true); ghost.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.5; o.material.depthWrite = false; } }); scene.add(ghost); }
 makeGhost();
 
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane0 = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit = new THREE.Vector3();
@@ -201,16 +236,28 @@ renderer.domElement.addEventListener('pointerdown', (e) => { downXY = { x: e.cli
 renderer.domElement.addEventListener('pointermove', (e) => { if (downXY && Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y) > 6) dragged = true; updateGhost(e); });
 renderer.domElement.addEventListener('pointerup', (e) => {
   const c = cellUnder(e);
-  if (!dragged && c && e.button === 0 && (eraseMode || curType)) { if (eraseMode) removeTile(c.gx, c.gz); else placeTile(c.gx, c.gz, curType, curRot); refresh(); scheduleSave(); }
+  if (!dragged && c && e.button === 0 && (eraseMode || curType)) {
+    if (eraseMode) eraseAt(c.gx, c.gz);
+    else if (kindOf(curType) === 'tile') placeTile(c.gx, c.gz, curType, curRot);
+    else if (assetOf(curType)) placeObject(c.gx, c.gz, curType, curRot);
+    refresh(); scheduleSave();
+  }
   downXY = null;
 });
-renderer.domElement.addEventListener('contextmenu', (e) => { e.preventDefault(); const c = cellUnder(e); if (c) { removeTile(c.gx, c.gz); refresh(); scheduleSave(); } });
+renderer.domElement.addEventListener('contextmenu', (e) => { e.preventDefault(); const c = cellUnder(e); if (c) { eraseAt(c.gx, c.gz); refresh(); scheduleSave(); } });
 addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') { curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°'; } });
 
-// ---------- UI ----------
+// ---------- UI : palette en rubriques repliables ----------
 const pal = document.getElementById('pal');
-for (const k in TILES) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = TILES[k].label; b.dataset.t = k; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; pal.appendChild(b); }   // re-clic sur le bouton actif = désélection (la souris ne pose plus rien)
-function highlight() { for (const b of pal.querySelectorAll('button')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; }
+const CATS = [{ name: '🛣️ Routes', items: TILES, open: true }, { name: '🏠 Maisons', items: HOUSES, open: false }];
+for (const cat of CATS) {
+  const wrap = document.createElement('div'); wrap.className = 'cat' + (cat.open ? ' open' : '');
+  const head = document.createElement('div'); head.className = 'head'; head.innerHTML = '<span>' + cat.name + '</span><span class="arw">▸</span>'; head.onclick = () => wrap.classList.toggle('open');
+  const body = document.createElement('div'); body.className = 'body';
+  for (const k in cat.items) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = cat.items[k].label; b.dataset.t = k; if (cat.items === HOUSES && !HOUSE_ASSET[k]) b.disabled = true; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; body.appendChild(b); }
+  wrap.appendChild(head); wrap.appendChild(body); pal.appendChild(wrap);
+}
+function highlight() { for (const b of pal.querySelectorAll('button.tile')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; }
 document.getElementById('rotate').onclick = () => { curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°'; };
 document.getElementById('erase').onclick = () => { eraseMode = !eraseMode; if (ghost) ghost.visible = false; highlight(); };
 document.getElementById('clear').onclick = () => { if (confirm('Vider toute la carte ?')) { clearAll(); scheduleSave(); } };
@@ -220,7 +267,7 @@ document.getElementById('view').onclick = () => {
   document.getElementById('view').textContent = to2d ? '🎥 Vue 3D' : '🗺️ Vue 2D (plan)';
 };
 document.getElementById('save').onclick = () => saveNow(true);
-function refresh() { document.getElementById('count').textContent = grid.size; }
+function refresh() { document.getElementById('count').textContent = grid.size + objects.size; }
 highlight(); refresh();
 
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.opacity = 1; setTimeout(() => t.style.opacity = 0, 1600); }
@@ -228,7 +275,12 @@ function toast(msg) { const t = document.getElementById('toast'); t.textContent 
 // ---------- Sauvegarde / chargement (Supabase, id=2) ----------
 let saveT = null;
 function scheduleSave() { clearTimeout(saveT); saveT = setTimeout(() => saveNow(false), 900); }
-function serialize() { const tiles = []; for (const [k, e] of grid) { const [gx, gz] = k.split('_').map(Number); tiles.push({ gx, gz, type: e.type, rot: e.rot }); } return { tiles }; }
+function serialize() {
+  const tiles = [], objs = [];
+  for (const [k, e] of grid) { const [gx, gz] = k.split('_').map(Number); tiles.push({ gx, gz, type: e.type, rot: e.rot }); }
+  for (const [k, e] of objects) { const [gx, gz] = k.split('_').map(Number); objs.push({ gx, gz, type: e.type, rot: e.rot }); }
+  return { tiles, objects: objs };
+}
 async function saveNow(manual) {
   const data = serialize();
   try {
@@ -241,12 +293,14 @@ async function load() {
   let data = null;
   try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.' + LAYOUT_ID + '&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); data = j && j[0] && j[0].data; } } catch (e) {}
   if (!data) { try { data = JSON.parse(localStorage.getItem('wispy_tiles') || 'null'); } catch (e) {} }
-  if (data && data.tiles) { for (const t of data.tiles) if (ASSET[t.type]) placeTile(t.gx, t.gz, t.type, t.rot || 0); refresh(); }
+  if (data && data.tiles) for (const t of data.tiles) if (ASSET[t.type]) placeTile(t.gx, t.gz, t.type, t.rot || 0);
+  if (data && data.objects) { pendingObjects = data.objects.slice(); placeReady(); }   // les maisons se posent au fur et à mesure du chargement des modèles
+  refresh();
 }
 load();
 
 // hook de test (inoffensif)
-window.__builder = { placeTile, refresh, cam3, ctr3 };
+window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, HOUSE_ASSET };
 
 // ---------- Boucle ----------
 renderer.setAnimationLoop(() => { ctr.update(); renderer.render(scene, cam); });
