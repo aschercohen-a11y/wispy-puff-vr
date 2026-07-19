@@ -39,6 +39,10 @@
   <div class="grp" id="sizeCtl" style="display:none">
     <div class="lbl">Taille de l'accessoire</div>
     <div class="row2"><button id="szM" class="act" style="flex:1">➖</button><button id="szV" class="act" style="flex:1.4;background:#123">100%</button><button id="szP" class="act" style="flex:1">➕</button></div>
+    <div id="offBox" style="display:none">
+      <div class="lbl" style="margin-top:8px">Écart à la route (paire)</div>
+      <div class="row2"><button id="offM" class="act" style="flex:1">⟵ route</button><button id="offP" class="act" style="flex:1">bord ⟶</button></div>
+    </div>
   </div>
   <div class="grp">
     <div class="lbl">Outils</div>
@@ -206,6 +210,9 @@ const objects = new Map();   // couche OBJETS (maisons/déco) : id unique -> { i
 let pendingObjects = [];     // objets sauvegardés en attente que leur modèle soit chargé
 const objScale = { lamp: 0.5 };   // échelle par TYPE d'accessoire (réglable ➖/➕) — défaut 1, lampadaire réduit
 function scaleFor(t) { return objScale[t] || 1; }
+const PAIRED = { lamp: true };     // objets posés en PAIRE (un de chaque côté de la route)
+const objOff = { lamp: 5 };        // écart à l'axe de la route pour les paires (5 = milieu trottoir ; 3.2 ≈ bord route ; 6.6 ≈ bord extérieur)
+function offFor(t) { return objOff[t] != null ? objOff[t] : 5; }
 const worldGroup = new THREE.Group(); scene.add(worldGroup);
 let curType = 'route', curRot = 0, eraseMode = false;
 
@@ -227,10 +234,10 @@ function removeObjectById(id) { const e = objects.get(id); if (e) { worldGroup.r
 function removeObjectsInCell(gx, gz) { for (const [id, e] of [...objects]) if (e.gx === gx && e.gz === gz) removeObjectById(id); }
 function placeObject(gx, gz, type, rot) {
   removeObjectsInCell(gx, gz);
-  if (type === 'lamp') {   // lampadaire = PAIRE, un de chaque côté de la route (selon la rotation), qui se font face
-    const off = SIDE_Z;
-    if (rot % 2 === 0) { addObject('lamp', gx, gz, 0, off, rot); addObject('lamp', gx, gz, 0, -off, rot + 2); }
-    else { addObject('lamp', gx, gz, off, 0, rot); addObject('lamp', gx, gz, -off, 0, rot + 2); }
+  if (PAIRED[type]) {   // objet = PAIRE, un de chaque côté de la route (selon la rotation), qui se font face
+    const off = offFor(type);
+    if (rot % 2 === 0) { addObject(type, gx, gz, 0, off, rot); addObject(type, gx, gz, 0, -off, rot + 2); }
+    else { addObject(type, gx, gz, off, 0, rot); addObject(type, gx, gz, -off, 0, rot + 2); }
   } else addObject(type, gx, gz, 0, 0, rot);
 }
 function pickObject(e) {   // id de l'objet sous le curseur (pour supprimer celui-là précisément)
@@ -296,11 +303,19 @@ for (const cat of CATS) {
   wrap.appendChild(head); wrap.appendChild(body); pal.appendChild(wrap);
 }
 function highlight() { for (const b of pal.querySelectorAll('button.tile')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; updateSizeCtl(); }
-function updateSizeCtl() { const el = document.getElementById('sizeCtl'); const isObj = !eraseMode && curType && kindOf(curType) === 'object'; el.style.display = isObj ? 'block' : 'none'; if (isObj) document.getElementById('szV').textContent = Math.round(scaleFor(curType) * 100) + '%'; }
+function updateSizeCtl() {
+  const el = document.getElementById('sizeCtl'); const isObj = !eraseMode && curType && kindOf(curType) === 'object';
+  el.style.display = isObj ? 'block' : 'none'; if (isObj) document.getElementById('szV').textContent = Math.round(scaleFor(curType) * 100) + '%';
+  document.getElementById('offBox').style.display = (isObj && PAIRED[curType]) ? 'block' : 'none';   // écart : seulement pour les paires (lampadaire)
+}
 function applyScale(type) { for (const e of objects.values()) if (e.type === type) e.mesh.scale.setScalar(scaleFor(type)); if (ghost && curType === type) ghost.scale.setScalar(scaleFor(type)); }
 function bumpScale(f) { if (!curType || kindOf(curType) !== 'object') return; objScale[curType] = Math.min(3, Math.max(0.15, scaleFor(curType) * f)); applyScale(curType); updateSizeCtl(); scheduleSave(); }   // re-dimensionne aussi les objets déjà posés de ce type
+function applyOffset(type) { const off = offFor(type); for (const e of objects.values()) if (e.type === type) { if (e.ox !== 0) e.ox = Math.sign(e.ox) * off; else if (e.oz !== 0) e.oz = Math.sign(e.oz) * off; e.mesh.position.set(e.gx * T + e.ox, 0.03, e.gz * T + e.oz); } }
+function bumpOffset(d) { if (!curType || !PAIRED[curType]) return; objOff[curType] = Math.min(6.6, Math.max(3.2, offFor(curType) + d)); applyOffset(curType); scheduleSave(); }   // rapproche/éloigne la paire de la route
 document.getElementById('szM').onclick = () => bumpScale(0.85);
 document.getElementById('szP').onclick = () => bumpScale(1.18);
+document.getElementById('offM').onclick = () => bumpOffset(-0.6);
+document.getElementById('offP').onclick = () => bumpOffset(0.6);
 document.getElementById('rotate').onclick = () => { curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°'; };
 document.getElementById('erase').onclick = () => { eraseMode = !eraseMode; if (ghost) ghost.visible = false; highlight(); };
 document.getElementById('clear').onclick = () => { if (confirm('Vider toute la carte ?')) { clearAll(); scheduleSave(); } };
@@ -322,7 +337,7 @@ function serialize() {
   const tiles = [], objs = [];
   for (const [k, e] of grid) { const [gx, gz] = k.split('_').map(Number); tiles.push({ gx, gz, type: e.type, rot: e.rot }); }
   for (const e of objects.values()) objs.push({ gx: e.gx, gz: e.gz, ox: e.ox, oz: e.oz, type: e.type, rot: e.rot });
-  return { tiles, objects: objs, objScale };
+  return { tiles, objects: objs, objScale, objOff };
 }
 async function saveNow(manual) {
   const data = serialize();
@@ -337,6 +352,7 @@ async function load() {
   try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.' + LAYOUT_ID + '&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); data = j && j[0] && j[0].data; } } catch (e) {}
   if (!data) { try { data = JSON.parse(localStorage.getItem('wispy_tiles') || 'null'); } catch (e) {} }
   if (data && data.objScale) Object.assign(objScale, data.objScale);   // tailles réglées, appliquées dès la pose
+  if (data && data.objOff) Object.assign(objOff, data.objOff);         // écarts réglés
   if (data && data.tiles) for (const t of data.tiles) if (ASSET[t.type]) placeTile(t.gx, t.gz, t.type, t.rot || 0);
   if (data && data.objects) { pendingObjects = data.objects.slice(); placeReady(); }   // les maisons se posent au fur et à mesure du chargement des modèles
   refresh();
