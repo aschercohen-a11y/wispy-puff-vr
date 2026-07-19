@@ -942,6 +942,7 @@
     carBaseBox = new THREE.Box3().setFromObject(base);
     for (let i = 0; i < 5; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); const v = { mesh: m, box: carBaseBox, kind: 'car', scale: trafficScale }; cars.push(v); vehDims(v); }
     for (let i = 0; i < cars.length; i++) if (cars[i].kind === 'car') respawnCar(cars[i], hero.position.x + 12 + i * 16);
+    buildIntersections();                                // crée les intersections (rue transversale + trafic mortel)
   });
   new GLTFLoader().load('models/bus.glb', function (gltf) {
     const base = gltf.scene; dside(base); unlit(base);
@@ -949,6 +950,57 @@
     busBaseBox = new THREE.Box3().setFromObject(base);
     for (let i = 0; i < 2; i++) { const m = base.clone(true); m.rotation.y = BUS_MODEL_YAW; scene.add(m); const v = { mesh: m, box: busBaseBox, kind: 'bus', scale: busScale }; cars.push(v); vehDims(v); respawnCar(v, hero.position.x + 45 + i * 35); }
   });
+
+  // ============================================================
+  //  INTERSECTIONS : rue transversale + trafic qui traverse (droite↔gauche) = MORTEL (à timer / sauter par-dessus)
+  // ============================================================
+  const intersections = [];
+  const INTER_SPACING = 72;
+  function buildIntersections() {
+    if (intersections.length || !assetBase.car || !carBaseBox) return;
+    const asphalt = new THREE.MeshBasicMaterial({ color: 0x555a63 }), lineMat = new THREE.MeshBasicMaterial({ color: 0xf2e7c4 });
+    for (let i = 0; i < 3; i++) {
+      const grp = new THREE.Group();
+      const cr = new THREE.Mesh(new THREE.PlaneGeometry(9, 72), asphalt); cr.rotation.x = -Math.PI / 2; cr.position.y = 0.015; grp.add(cr);
+      for (let z = -34; z < 35; z += 4) { const d = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 1.7), lineMat); d.rotation.x = -Math.PI / 2; d.position.set(0, 0.021, z); grp.add(d); }
+      scene.add(grp);
+      const inter = { x: -9999, group: grp, cars: [] };
+      for (let k = 0; k < 4; k++) { const m = assetBase.car.clone(true); unlit(m); scene.add(m); inter.cars.push({ mesh: m, laneX: (k % 2 === 0) ? -2.2 : 2.2, z: 0, speed: 0, dir: 1 }); }
+      intersections.push(inter);
+      placeIntersection(inter, hero.position.x + 40 + i * INTER_SPACING);
+    }
+  }
+  function placeIntersection(inter, x) {
+    inter.x = x; inter.group.position.x = x;
+    const s = trafficScale, gy = -carBaseBox.min.y * s;
+    for (let j = 0; j < inter.cars.length; j++) {
+      const c = inter.cars[j];
+      c.dir = c.laneX < 0 ? 1 : -1;                                  // deux sens (gauche/droite)
+      c.z = -c.dir * (10 + j * 13 + Math.random() * 10);            // étalées, arrivent des côtés
+      c.speed = 6 + Math.random() * 5;
+      c.mesh.scale.setScalar(s); c.mesh.position.set(x + c.laneX, gy, c.z);
+      c.mesh.rotation.y = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2;   // orientée le long de Z
+    }
+  }
+  function updateIntersections(dt) {
+    if (!intersections.length) return;
+    const s = trafficScale;
+    const cl = (carBaseBox.max.x - carBaseBox.min.x) / 2 * s, cw = (carBaseBox.max.z - carBaseBox.min.z) / 2 * s, ctop = (carBaseBox.max.y - carBaseBox.min.y) * s;
+    let maxX = -1e9; for (const it of intersections) maxX = Math.max(maxX, it.x);
+    for (const inter of intersections) {
+      if (inter.x < hero.position.x - 30) { placeIntersection(inter, maxX + INTER_SPACING); maxX = inter.x; continue; }   // recyclage devant
+      for (const c of inter.cars) {
+        c.z += c.dir * c.speed * dt;
+        if (c.z > 36) c.z = -36; else if (c.z < -36) c.z = 36;       // boucle sur la rue transversale
+        c.mesh.position.x = inter.x + c.laneX; c.mesh.position.z = c.z;
+        const dx = hero.position.x - c.mesh.position.x, dz = hero.position.z - c.mesh.position.z;
+        // voiture tournée 90° → largeur le long de X, longueur le long de Z. Mort sauf si on saute PAR-DESSUS (assez haut) ou invincible.
+        if (Math.abs(dx) < cw + HERO_RADIUS && Math.abs(dz) < cl + HERO_RADIUS && hero.position.y < ctop - 0.1) {
+          if (heroDeadT <= 0 && heroFallT <= 0 && heroInvuln <= 0) { heroDeadT = 1.9; if (fallAction) fallAction.reset(); }
+        }
+      }
+    }
+  }
   // Fumée d'échappement = PARTICULES douces (billboards avec dégradé radial)
   const smoke = [];
   { const sc = document.createElement('canvas'); sc.width = sc.height = 64; const sx = sc.getContext('2d');
@@ -1821,6 +1873,7 @@
     // ============================================================
     {
       updatePeds(dt);                                                            // piétons (marche + traversée)
+      updateIntersections(dt);                                                   // trafic transversal des intersections (mortel)
       heroCar = null;
       for (const car of cars) {
         let nx = car.mesh.position.x - car.speed * dt;                          // avance vers le joueur
