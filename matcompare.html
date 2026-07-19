@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Comparaison matériaux — Meshy</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe0ee; font-family: 'Trebuchet MS', sans-serif; }
+  #labels { position: fixed; top: 0; left: 0; width: 100%; display: flex; z-index: 10; pointer-events: none; }
+  #labels > div { flex: 1; text-align: center; padding: 10px; color: #123; font-weight: bold; font-size: 15px; text-shadow: 0 1px 2px #fff; }
+  #info { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 10; background: rgba(12,22,42,.9); color: #dff; padding: 8px 14px; border-radius: 10px; font-size: 12px; text-align: center; }
+  select { font-size: 13px; padding: 3px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="labels">
+  <div>1️⃣ Original (Standard / PBR)<br><small>lourd Quest</small></div>
+  <div>2️⃣ Basic (unlit)<br><small>texture telle quelle · le + léger</small></div>
+  <div>3️⃣ Lambert<br><small>éclairage simple</small></div>
+</div>
+<div id="info">Modèle : <select id="pick"></select> · <span id="tris"></span> · clic-glisser = tourner · molette = zoom</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
+import { OrbitControls } from './vendor/controls/OrbitControls.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xcfe0ee);
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.05, 200);
+camera.position.set(0, 4, 12);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+document.body.appendChild(renderer.domElement);
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.0));
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.2); sun.position.set(4, 8, 5); scene.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 30), new THREE.MeshBasicMaterial({ color: 0x9fb87e }));
+ground.rotation.x = -Math.PI / 2; ground.position.y = -0.01; scene.add(ground);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2, 0); controls.enableDamping = true; controls.update();
+
+const loader = new GLTFLoader();
+let group = new THREE.Group(); scene.add(group);
+const SPACING = 6;
+
+// convertit un modèle : garde la MAP diffuse, applique le matériau choisi, retire normal/rough/metal/ao
+function convert(obj, mode) {
+  obj.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    const src = Array.isArray(o.material) ? o.material[0] : o.material;
+    const map = src.map || null;
+    if (map) map.colorSpace = THREE.SRGBColorSpace;
+    let m;
+    if (mode === 'basic') m = new THREE.MeshBasicMaterial({ map: map, color: map ? 0xffffff : (src.color || 0xffffff), side: THREE.DoubleSide });
+    else if (mode === 'lambert') m = new THREE.MeshLambertMaterial({ map: map, color: map ? 0xffffff : (src.color || 0xffffff), side: THREE.DoubleSide });
+    else { m = src; m.side = THREE.DoubleSide; }   // original
+    o.material = m;
+  });
+}
+
+function fit(obj, targetH) {
+  const box = new THREE.Box3().setFromObject(obj), h = (box.max.y - box.min.y) || 1;
+  obj.scale.setScalar(targetH / h);
+  const b2 = new THREE.Box3().setFromObject(obj); obj.position.y = -b2.min.y;
+}
+
+function show(url) {
+  scene.remove(group); group = new THREE.Group(); scene.add(group);
+  loader.load(url, (gltf) => {
+    const modes = ['orig', 'basic', 'lambert'];
+    let tris = 0; gltf.scene.traverse(o => { if (o.isMesh && o.geometry) { const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
+    modes.forEach((mode, i) => {
+      const c = gltf.scene.clone(true);
+      c.traverse(o => { if (o.isMesh) o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone(); });
+      convert(c, mode);
+      fit(c, 4);
+      c.position.x = (i - 1) * SPACING;
+      group.add(c);
+    });
+    document.getElementById('tris').textContent = '~' + Math.round(tris / 1000) + 'k tris';
+  });
+}
+
+const MODELS = [
+  ['Maison 1', 'models/house1.glb'], ['Maison 2', 'models/house2.glb'],
+  ['Boulangerie', 'models/house_bakery.glb'], ['Moulin', 'models/windmill.glb'],
+  ['Chaumière', 'models/pp_cottage.glb'], ['Maison carotte', 'models/carrothouse.glb'],
+];
+const sel = document.getElementById('pick');
+for (const [name, url] of MODELS) { const o = document.createElement('option'); o.value = url; o.textContent = name; sel.appendChild(o); }
+sel.onchange = e => show(e.target.value);
+show(MODELS[0][1]);
+
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>
