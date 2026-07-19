@@ -289,14 +289,8 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (downXY && Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y) > 6) dragged = true;
-  if (grabbed) {   // glisse l'objet où pointe la souris (grille fine 0.5)
-    const w = worldPoint(e); if (w) {
-      if (grabbed.pid) {   // PAIRE : les 2 bougent ensemble le long de la route, hauteur (écart) forcée = même ligne que les premiers
-        const off = offFor(grabbed.type);
-        if (grabbed.axis === 'x') { const nx = snap(w.x); for (const e2 of objects.values()) if (e2.pid === grabbed.pid) { e2.ox = nx - e2.gx * T; e2.oz = e2.side * off; e2.mesh.position.set(nx, 0.03, e2.gz * T + e2.oz); } }
-        else { const nz = snap(w.z); for (const e2 of objects.values()) if (e2.pid === grabbed.pid) { e2.oz = nz - e2.gz * T; e2.ox = e2.side * off; e2.mesh.position.set(e2.gx * T + e2.ox, 0.03, nz); } }
-      } else { const sx = snap(w.x), sz = snap(w.z); grabbed.ox = sx - grabbed.gx * T; grabbed.oz = sz - grabbed.gz * T; grabbed.mesh.position.set(sx, 0.03, sz); }
-    }
+  if (grabbed) {   // glisse l'objet LIBREMENT où pointe la souris (aimanté à la grille 0.5) — tu peux le poser pile sur le trottoir
+    const w = worldPoint(e); if (w) { const sx = snap(w.x), sz = snap(w.z); grabbed.ox = sx - grabbed.gx * T; grabbed.oz = sz - grabbed.gz * T; grabbed.mesh.position.set(sx, 0.03, sz); }
     return;
   }
   updateGhost(e);
