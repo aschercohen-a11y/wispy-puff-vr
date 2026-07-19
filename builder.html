@@ -108,9 +108,10 @@ const EDGE = new THREE.MeshBasicMaterial({ color: 0xe9e4d2 });
 // ---------- Dimensions d'une tuile ----------
 const T = 14, ROAD_W = 6, HALF = T / 2, SIDE_W = HALF - ROAD_W / 2;   // 6 route + 2×4 trottoir = 14 PILE (trottoir jusqu'au bord → aucune languette d'herbe entre tuiles)
 const SIDE_Z = ROAD_W / 2 + SIDE_W / 2;                  // centre trottoir = 5
+const CURB_H = 0.14, OBJ_Y = CURB_H;                     // trottoir SURÉLEVÉ (bordure) ; les accessoires reposent sur le dessus
 
 function plane(w, h, mat, y, x, z) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.rotation.x = -Math.PI / 2; m.position.set(x || 0, y, z || 0); return m; }
-function sidewalk(w, h, x, z) { const m = plane(w, h, new THREE.MeshBasicMaterial({ map: tileTex(1) }), 0.014, x, z); m.material.map.repeat.set(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2))); return m; }
+function sidewalk(w, h, x, z) { const tex = tileTex(1); tex.repeat.set(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2))); const m = new THREE.Mesh(new THREE.BoxGeometry(w, CURB_H, h), new THREE.MeshBasicMaterial({ map: tex })); m.position.set(x, CURB_H / 2, z); return m; }   // trottoir = pavé SURÉLEVÉ (bordure visible au-dessus de la route)
 function freshGrass() { const g = plane(T, T, new THREE.MeshBasicMaterial({ map: GRASS_TEX.clone() }), 0.002); g.material.map.repeat.set(4, 4); return g; }
 
 // ---------- Constructeurs de tuiles (chaque tuile = groupe 14×14, centré, unlit) ----------
@@ -228,7 +229,7 @@ function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { worldGro
 let objId = 0, pairSeq = 0;
 function addObject(type, gx, gz, ox, oz, rot, meta) {   // pose 1 objet précis (id unique → suppressible seul)
   const a = OBJ_ASSET[type]; if (!a) return;
-  const mesh = a.clone(true); mesh.position.set(gx * T + ox, 0.03, gz * T + oz); mesh.rotation.y = rot * Math.PI / 2; mesh.scale.setScalar(scaleFor(type));
+  const mesh = a.clone(true); mesh.position.set(gx * T + ox, OBJ_Y, gz * T + oz); mesh.rotation.y = rot * Math.PI / 2; mesh.scale.setScalar(scaleFor(type));
   const id = ++objId; mesh.userData.objId = id; worldGroup.add(mesh);
   objects.set(id, { id, type, gx, gz, ox, oz, rot, mesh, pid: meta && meta.pid, axis: meta && meta.axis, side: meta && meta.side });
 }
@@ -278,7 +279,7 @@ function worldPoint(e) {   // point du sol sous le curseur (non arrondi) pour d�
 function updateGhost(e) {
   const c = cellUnder(e); hoverG = c;
   if (!ghost || !curType || eraseMode || moveMode || !c) { if (ghost) ghost.visible = false; return; }
-  ghost.visible = true; ghost.position.set(c.gx * T, 0.03, c.gz * T); ghost.rotation.y = curRot * Math.PI / 2;
+  ghost.visible = true; ghost.position.set(c.gx * T, kindOf(curType) === 'object' ? OBJ_Y : 0.03, c.gz * T); ghost.rotation.y = curRot * Math.PI / 2;
 }
 
 // ---------- Interaction ----------
@@ -299,8 +300,8 @@ renderer.domElement.addEventListener('pointermove', (e) => {
           else { const d = Math.abs(e2.mesh.position.x - tx); if (d < bd) { bd = d; tx = e2.mesh.position.x; } }                          // route verticale : ligne = X
         }
         const dx = tx - (grabbed.gx * T + grabbed.ox), dz = tz - (grabbed.gz * T + grabbed.oz);   // déplacement du lampadaire attrapé
-        for (const e2 of objects.values()) if (e2.pid === grabbed.pid) { e2.ox += dx; e2.oz += dz; e2.mesh.position.set(e2.gx * T + e2.ox, 0.03, e2.gz * T + e2.oz); }   // toute la paire suit le même déplacement
-      } else { grabbed.ox = sx - grabbed.gx * T; grabbed.oz = sz - grabbed.gz * T; grabbed.mesh.position.set(sx, 0.03, sz); }
+        for (const e2 of objects.values()) if (e2.pid === grabbed.pid) { e2.ox += dx; e2.oz += dz; e2.mesh.position.set(e2.gx * T + e2.ox, OBJ_Y, e2.gz * T + e2.oz); }   // toute la paire suit le même déplacement
+      } else { grabbed.ox = sx - grabbed.gx * T; grabbed.oz = sz - grabbed.gz * T; grabbed.mesh.position.set(sx, OBJ_Y, sz); }
     }
     return;
   }
