@@ -1462,9 +1462,17 @@
     let o = hits[0].object; while (o && !EDIT.placed.find(p => p.mesh === o)) o = o.parent;
     return EDIT.placed.find(p => p.mesh === o) || null;
   }
+  // convertit le décor en UNLIT (MeshBasicMaterial) : garde la texture, léger pour le Quest, look flat cartoon
+  function unlit(obj) {
+    obj.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      const conv = (src) => { if (src.map) src.map.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshBasicMaterial({ map: src.map || null, color: src.map ? 0xffffff : (src.color ? src.color.clone() : new THREE.Color(0xffffff)), side: THREE.DoubleSide, transparent: !!src.transparent, opacity: src.opacity != null ? src.opacity : 1 }); };
+      o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
+    });
+  }
   function editSpawn(type, x, z, rotY, scale, select) {
     const base = assetBase[type]; if (!base) return null;
-    const m = base.clone(true);
+    const m = base.clone(true); unlit(m);   // décor en unlit (garde la texture)
     const s = scale != null ? scale : (EDIT_TYPES[type] ? EDIT_TYPES[type].s : 1);
     m.scale.setScalar(s);
     m.rotation.y = rotY || 0;
