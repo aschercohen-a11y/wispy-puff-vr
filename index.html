@@ -818,6 +818,17 @@
     assetBase.crosswalk = grp;                                                                // dispo dans l'éditeur
   }
 
+  // --- ROUTE TRANSVERSALE (procédurale) : chaussée 3 voies à poser EN TRAVERS (façon intersection) ---
+  {
+    const grp = new THREE.Group(), LEN = 30, W = 6;                                          // largeur = route principale
+    const asph = new THREE.Mesh(new THREE.PlaneGeometry(LEN, W), new THREE.MeshBasicMaterial({ color: 0x555a63 }));
+    asph.rotation.x = -Math.PI / 2; asph.position.y = 0.02; grp.add(asph);
+    const line = (c) => new THREE.MeshBasicMaterial({ color: c });
+    for (const zc of [-W / 2 + 0.25, W / 2 - 0.25]) { const e = new THREE.Mesh(new THREE.PlaneGeometry(LEN, 0.18), line(0xe9e4d2)); e.rotation.x = -Math.PI / 2; e.position.set(0, 0.021, zc); grp.add(e); }   // bords blancs
+    for (const zc of [-1, 1]) for (let x = -LEN / 2 + 1; x < LEN / 2; x += 2.5) { const d = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.16), line(0xf2e7c4)); d.rotation.x = -Math.PI / 2; d.position.set(x, 0.022, zc); grp.add(d); }   // 2 pointillés = 3 voies
+    assetBase.crossroad = grp;
+  }
+
   // --- FONTAINE : modèle pierre (Meshy) + EAU ANIMÉE par-dessus (jet central + 4 cascades + ondulations) ---
   const _dropTex = (function () {
     const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d');
@@ -1431,6 +1442,7 @@
     path:     { label: '🚪 Allée / entrée', s: 1.0 },
     paving:   { label: '🧱 Dalle (sol)',     s: 1.0 },
     crosswalk:{ label: '🦓 Passage piéton',  s: 1.0 },
+    crossroad:{ label: '🛣️ Route transversale', s: 1.0 },
     fountain: { label: '⛲ Fontaine',        s: 2.2 },
   };
   const _eray = new THREE.Raycaster(), _emouse = new THREE.Vector2(), _eplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _ehit = new THREE.Vector3();
@@ -1476,7 +1488,7 @@
     return rec;
   }
   // masque les brins d'herbe sous les objets de sol posés (dalle, passage piéton, allée)
-  const GROUND_TYPES = { paving: true, crosswalk: true, path: true };
+  const GROUND_TYPES = { paving: true, crosswalk: true, path: true, crossroad: true };
   const _zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
   function applyGroundMask() {
     if (!grassMesh || !grassOrig) return;

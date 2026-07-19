@@ -837,6 +837,17 @@
     assetBase.crosswalk = grp;                                                                // dispo dans l'éditeur
   }
 
+  // --- ROUTE TRANSVERSALE (procédurale) : chaussée 3 voies à poser EN TRAVERS (façon intersection) ---
+  {
+    const grp = new THREE.Group(), LEN = 30, W = 6;                                          // largeur = route principale
+    const asph = new THREE.Mesh(new THREE.PlaneGeometry(LEN, W), new THREE.MeshBasicMaterial({ color: 0x555a63 }));
+    asph.rotation.x = -Math.PI / 2; asph.position.y = 0.02; grp.add(asph);
+    const line = (c) => new THREE.MeshBasicMaterial({ color: c });
+    for (const zc of [-W / 2 + 0.25, W / 2 - 0.25]) { const e = new THREE.Mesh(new THREE.PlaneGeometry(LEN, 0.18), line(0xe9e4d2)); e.rotation.x = -Math.PI / 2; e.position.set(0, 0.021, zc); grp.add(e); }   // bords blancs
+    for (const zc of [-1, 1]) for (let x = -LEN / 2 + 1; x < LEN / 2; x += 2.5) { const d = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.16), line(0xf2e7c4)); d.rotation.x = -Math.PI / 2; d.position.set(x, 0.022, zc); grp.add(d); }   // 2 pointillés = 3 voies
+    assetBase.crossroad = grp;
+  }
+
   // --- FONTAINE : modèle pierre (Meshy) + EAU ANIMÉE par-dessus (jet central + 4 cascades + ondulations) ---
   const _dropTex = (function () {
     const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d');
@@ -942,7 +953,6 @@
     carBaseBox = new THREE.Box3().setFromObject(base);
     for (let i = 0; i < 5; i++) { const m = base.clone(true); m.rotation.y = CAR_MODEL_YAW; scene.add(m); const v = { mesh: m, box: carBaseBox, kind: 'car', scale: trafficScale }; cars.push(v); vehDims(v); }
     for (let i = 0; i < cars.length; i++) if (cars[i].kind === 'car') respawnCar(cars[i], hero.position.x + 12 + i * 16);
-    buildIntersections();                                // crée les intersections (rue transversale + trafic mortel)
   });
   new GLTFLoader().load('models/bus.glb', function (gltf) {
     const base = gltf.scene; dside(base); unlit(base);
@@ -952,52 +962,28 @@
   });
 
   // ============================================================
-  //  INTERSECTIONS : rue transversale + trafic qui traverse (droite↔gauche) = MORTEL (à timer / sauter par-dessus)
+  //  ROUTE TRANSVERSALE (plaçable) + TRAFIC transversal MORTEL dessus
   // ============================================================
-  const intersections = [];
-  const INTER_SPACING = 72;
-  function buildIntersections() {
-    if (intersections.length || !assetBase.car || !carBaseBox) return;
-    const asphalt = new THREE.MeshBasicMaterial({ color: 0x555a63 }), lineMat = new THREE.MeshBasicMaterial({ color: 0xf2e7c4 });
-    for (let i = 0; i < 3; i++) {
-      const grp = new THREE.Group();
-      const cr = new THREE.Mesh(new THREE.PlaneGeometry(9, 72), asphalt); cr.rotation.x = -Math.PI / 2; cr.position.y = 0.015; grp.add(cr);
-      for (let z = -34; z < 35; z += 4) { const d = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 1.7), lineMat); d.rotation.x = -Math.PI / 2; d.position.set(0, 0.021, z); grp.add(d); }
-      scene.add(grp);
-      const inter = { x: -9999, group: grp, cars: [] };
-      for (let k = 0; k < 4; k++) { const m = assetBase.car.clone(true); unlit(m); scene.add(m); inter.cars.push({ mesh: m, laneX: (k % 2 === 0) ? -2.2 : 2.2, z: 0, speed: 0, dir: 1 }); }
-      intersections.push(inter);
-      placeIntersection(inter, hero.position.x + 40 + i * INTER_SPACING);
-    }
-  }
-  function placeIntersection(inter, x) {
-    inter.x = x; inter.group.position.x = x;
+  const crossroads = [];           // recs de type 'crossroad' (remplis à la pose)
+  const crossPool = [];            // pool de voitures transversales
+  function updateCrossTraffic(dt) {
+    if (!crossroads.length || !assetBase.car || !carBaseBox) return;
+    if (!crossPool.length) for (let i = 0; i < 4; i++) { const m = assetBase.car.clone(true); unlit(m); m.visible = false; scene.add(m); crossPool.push({ mesh: m, z: 0, dir: 1, laneX: 0, speed: 0, ax: null }); }
+    // la transversale la plus proche DEVANT le joueur
+    let target = null, bd = 1e9;
+    for (const rec of crossroads) { const x = rec.mesh.position.x, d = x - hero.position.x; if (d > -6 && d < 55 && d < bd) { bd = d; target = rec; } }
     const s = trafficScale, gy = -carBaseBox.min.y * s;
-    for (let j = 0; j < inter.cars.length; j++) {
-      const c = inter.cars[j];
-      c.dir = c.laneX < 0 ? 1 : -1;                                  // deux sens (gauche/droite)
-      c.z = -c.dir * (10 + j * 13 + Math.random() * 10);            // étalées, arrivent des côtés
-      c.speed = 6 + Math.random() * 5;
-      c.mesh.scale.setScalar(s); c.mesh.position.set(x + c.laneX, gy, c.z);
-      c.mesh.rotation.y = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2;   // orientée le long de Z
-    }
-  }
-  function updateIntersections(dt) {
-    if (!intersections.length) return;
-    const s = trafficScale;
     const cl = (carBaseBox.max.x - carBaseBox.min.x) / 2 * s, cw = (carBaseBox.max.z - carBaseBox.min.z) / 2 * s, ctop = (carBaseBox.max.y - carBaseBox.min.y) * s;
-    let maxX = -1e9; for (const it of intersections) maxX = Math.max(maxX, it.x);
-    for (const inter of intersections) {
-      if (inter.x < hero.position.x - 30) { placeIntersection(inter, maxX + INTER_SPACING); maxX = inter.x; continue; }   // recyclage devant
-      for (const c of inter.cars) {
-        c.z += c.dir * c.speed * dt;
-        if (c.z > 36) c.z = -36; else if (c.z < -36) c.z = 36;       // boucle sur la rue transversale
-        c.mesh.position.x = inter.x + c.laneX; c.mesh.position.z = c.z;
-        const dx = hero.position.x - c.mesh.position.x, dz = hero.position.z - c.mesh.position.z;
-        // voiture tournée 90° → largeur le long de X, longueur le long de Z. Mort sauf si on saute PAR-DESSUS (assez haut) ou invincible.
-        if (Math.abs(dx) < cw + HERO_RADIUS && Math.abs(dz) < cl + HERO_RADIUS && hero.position.y < ctop - 0.1) {
-          if (heroDeadT <= 0 && heroFallT <= 0 && heroInvuln <= 0) { heroDeadT = 1.9; if (fallAction) fallAction.reset(); }
-        }
+    for (let i = 0; i < crossPool.length; i++) {
+      const c = crossPool[i];
+      if (!target) { c.mesh.visible = false; c.ax = null; continue; }
+      const tx = target.mesh.position.x;
+      if (c.ax !== tx) { c.ax = tx; c.dir = (i % 2 === 0) ? 1 : -1; c.laneX = (i % 2 === 0) ? -2 : 2; c.z = -c.dir * (5 + i * 7 + Math.random() * 8); c.speed = 6 + Math.random() * 4; c.mesh.scale.setScalar(s); c.mesh.rotation.y = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
+      c.z += c.dir * c.speed * dt; if (c.z > 14) c.z = -14; else if (c.z < -14) c.z = 14;
+      c.mesh.visible = true; c.mesh.position.set(tx + c.laneX, gy, c.z);
+      const dx = hero.position.x - c.mesh.position.x, dz = hero.position.z - c.mesh.position.z;   // voiture tournée 90° : largeur en X, longueur en Z
+      if (Math.abs(dx) < cw + HERO_RADIUS && Math.abs(dz) < cl + HERO_RADIUS && hero.position.y < ctop - 0.1) {
+        if (heroDeadT <= 0 && heroFallT <= 0 && heroInvuln <= 0) { heroDeadT = 1.9; if (fallAction) fallAction.reset(); }
       }
     }
   }
@@ -1492,6 +1478,7 @@
     path:     { label: '🚪 Allée / entrée', s: 1.0 },
     paving:   { label: '🧱 Dalle (sol)',     s: 1.0 },
     crosswalk:{ label: '🦓 Passage piéton',  s: 1.0 },
+    crossroad:{ label: '🛣️ Route transversale', s: 1.0 },
     fountain: { label: '⛲ Fontaine',        s: 2.2 },
   };
   const _eray = new THREE.Raycaster(), _emouse = new THREE.Vector2(), _eplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _ehit = new THREE.Vector3();
@@ -1531,13 +1518,14 @@
     scene.add(m);   // SURF : aucun décalage → déco affichée EXACTEMENT comme dans le village (alignée)
     const rec = { type, mesh: m, scale: s, blades: m.getObjectByName('BLADES') };   // pales à faire tourner
     if (type === 'fountain') rec.water = buildFountainWater(m, s);                   // eau animée par-dessus la fontaine
+    if (type === 'crossroad') crossroads.push(rec);                                 // route transversale → trafic mortel dessus
     EDIT.placed.push(rec);
     if (GROUND_TYPES[type]) applyGroundMask();                                       // masque l'herbe sous les dalles/passages/allées
     if (select) editSelect(rec);
     return rec;
   }
   // masque les brins d'herbe sous les objets de sol posés (dalle, passage piéton, allée)
-  const GROUND_TYPES = { paving: true, crosswalk: true, path: true };
+  const GROUND_TYPES = { paving: true, crosswalk: true, path: true, crossroad: true };
   const _zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
   function applyGroundMask() {
     if (!grassMesh || !grassOrig) return;
@@ -1873,7 +1861,7 @@
     // ============================================================
     {
       updatePeds(dt);                                                            // piétons (marche + traversée)
-      updateIntersections(dt);                                                   // trafic transversal des intersections (mortel)
+      updateCrossTraffic(dt);                                                    // trafic transversal (sur les routes transversales posées)
       heroCar = null;
       for (const car of cars) {
         let nx = car.mesh.position.x - car.speed * dt;                          // avance vers le joueur
