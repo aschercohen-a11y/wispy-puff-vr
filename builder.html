@@ -135,6 +135,20 @@ function buildRail() {   // voie ferrée : ballast + traverses bois + 2 rails ac
   for (const z of [-1, 1]) { const r = new THREE.Mesh(new THREE.BoxGeometry(T, 0.12, 0.16), steelM); r.position.set(0, 0.12, z); g.add(r); }                       // 2 rails (écartement 2)
   return g;
 }
+function buildRouteHalf() {   // DEMI-ROUTE : 7 de long × 14 (même coupe que la route), pour combler/raccorder
+  const L = 7, g = new THREE.Group();
+  const gr = plane(L, T, new THREE.MeshBasicMaterial({ map: GRASS_TEX.clone() }), 0.002); gr.material.map.repeat.set(2, 4); g.add(gr);
+  g.add(plane(L, ROAD_W, ASPH, 0.02));
+  for (const s of [-1, 1]) g.add(sidewalk(L, SIDE_W, 0, s * SIDE_Z));
+  for (const off of [-1, 1]) for (let x = -L / 2 + 1.25; x < L / 2; x += 2.5) g.add(plane(1.2, 0.16, LINE, 0.022, x, off));
+  return g;
+}
+function buildPrairieHalf() {   // DEMI-PRAIRIE : carré 7×7
+  const S = 7, g = new THREE.Group();
+  const gr = plane(S, S, new THREE.MeshBasicMaterial({ map: GRASS_TEX.clone() }), 0.002); gr.material.map.repeat.set(2, 2); g.add(gr);
+  g.add(plane(S, S, new THREE.MeshBasicMaterial({ color: 0x4f7a3a, wireframe: true }), 0.006));
+  return g;
+}
 function buildPassage() {   // PASSAGE À NIVEAU : rails le long de X qui traversent une route le long de Z
   const g = new THREE.Group();
   g.add(plane(ROAD_W, T, ASPH, 0.02));                                    // chaussée perpendiculaire (le long de Z)
@@ -197,6 +211,8 @@ const TILES = {
   passage:   { label: '🚦 Passage à niveau', build: buildPassage },
   carrefour: { label: '➕ Carrefour',     build: buildCarrefour },
   prairie:   { label: '🌳 Prairie',       build: buildPrairie },
+  demi_route:{ label: '🛣️ Demi-route (7)', build: buildRouteHalf, half: true },
+  demi_prairie:{ label: '🟩 Demi-prairie (7×7)', build: buildPrairieHalf, half: true },
   // virage/Té : à finaliser prochainement (buildVirage / buildTe prêts mais pas encore assez propres)
 };
 const ASSET = {};
@@ -254,6 +270,8 @@ function assetOf(t) { return TILES[t] ? ASSET[t] : OBJ_ASSET[t]; }
 // ---------- État de la carte ----------
 const grid = new Map();      // couche SOL : "gx_gz" -> { type, rot, mesh }
 const objects = new Map();   // couche OBJETS (maisons/déco) : id unique -> { id, type, gx, gz, ox, oz, rot, mesh }
+const halfTiles = new Map();   // DEMI-BLOCS (grille fine 7) : "x_z" -> { type, x, z, rot, mesh }
+const HG = 7;                   // pas de la grille fine
 let pendingObjects = [];     // objets sauvegardés en attente que leur modèle soit chargé
 const objScale = { lamp: 0.5 };   // échelle par TYPE d'accessoire (réglable ➖/➕) — défaut 1, lampadaire réduit
 function scaleFor(t) { return objScale[t] || 1; }
@@ -295,9 +313,20 @@ function pickObject(e) {   // id de l'objet sous le curseur (pour supprimer celu
   const hits = ray.intersectObjects([...objects.values()].map(o => o.mesh), true); if (!hits.length) return null;
   let o = hits[0].object; while (o && o.userData.objId == null) o = o.parent; return o ? o.userData.objId : null;
 }
-function eraseAt(e, gx, gz) { const id = pickObject(e); if (id != null) removeObjectById(id); else removeTile(gx, gz); }   // enlève l'objet précis cliqué (ex : UN seul lampadaire), sinon la tuile
+function placeHalf(e, type, rot) {   // pose un demi-bloc sur la grille fine 7
+  const w = worldPoint(e); if (!w) return;
+  const x = Math.round(w.x / HG) * HG, z = Math.round(w.z / HG) * HG, k = x + '_' + z;
+  const ex = halfTiles.get(k); if (ex) worldGroup.remove(ex.mesh);
+  const mesh = ASSET[type].clone(true); mesh.position.set(x, 0, z); mesh.rotation.y = rot * Math.PI / 2;
+  worldGroup.add(mesh); halfTiles.set(k, { type, x, z, rot, mesh });
+}
+function eraseAt(e, gx, gz) {   // objet précis > demi-bloc (grille fine) > tuile pleine
+  const id = pickObject(e); if (id != null) { removeObjectById(id); return; }
+  const w = worldPoint(e); if (w) { const k = (Math.round(w.x / HG) * HG) + '_' + (Math.round(w.z / HG) * HG); const h = halfTiles.get(k); if (h) { worldGroup.remove(h.mesh); halfTiles.delete(k); return; } }
+  removeTile(gx, gz);
+}
 function placeReady() { pendingObjects = pendingObjects.filter(o => { if (OBJ_ASSET[o.type]) { addObject(o.type, o.gx, o.gz, o.ox || 0, o.oz || 0, o.rot || 0, { pid: o.pid, axis: o.axis, side: o.side }); return false; } return true; }); refresh(); }
-function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); for (const e of objects.values()) worldGroup.remove(e.mesh); grid.clear(); objects.clear(); pendingObjects = []; scheduleTrains(); refresh(); }
+function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); for (const e of objects.values()) worldGroup.remove(e.mesh); for (const e of halfTiles.values()) worldGroup.remove(e.mesh); grid.clear(); objects.clear(); halfTiles.clear(); pendingObjects = []; scheduleTrains(); refresh(); }
 
 // ---------- Grille de repère + fantôme ----------
 const gridHelper = new THREE.GridHelper(T * 40, 40, 0x88b0d0, 0x9ec4de); gridHelper.position.y = 0.001; gridHelper.material.opacity = 0.35; gridHelper.material.transparent = true; scene.add(gridHelper);
@@ -325,7 +354,10 @@ function worldPoint(e) {   // point du sol sous le curseur (non arrondi) pour d�
 function updateGhost(e) {
   const c = cellUnder(e); hoverG = c;
   if (!ghost || !curType || eraseMode || moveMode || !c) { if (ghost) ghost.visible = false; return; }
-  ghost.visible = true; ghost.position.set(c.gx * T, kindOf(curType) === 'object' ? OBJ_Y : 0.03, c.gz * T); ghost.rotation.y = curRot * Math.PI / 2;
+  ghost.visible = true;
+  if (TILES[curType] && TILES[curType].half) { const w = worldPoint(e); if (w) ghost.position.set(Math.round(w.x / HG) * HG, 0.03, Math.round(w.z / HG) * HG); }   // demi-bloc : grille fine 7
+  else ghost.position.set(c.gx * T, kindOf(curType) === 'object' ? OBJ_Y : 0.03, c.gz * T);
+  ghost.rotation.y = curRot * Math.PI / 2;
 }
 
 // ---------- Interaction ----------
@@ -360,6 +392,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     if (e.button === 2) { eraseAt(e, c.gx, c.gz); refresh(); scheduleSave(); }   // clic droit SANS glisser = supprimer l'objet/le bloc sous le curseur (2D et 3D)
     else if (e.button === 0 && (eraseMode || curType)) {
       if (eraseMode) eraseAt(e, c.gx, c.gz);
+      else if (TILES[curType] && TILES[curType].half) placeHalf(e, curType, curRot);
       else if (kindOf(curType) === 'tile') placeTile(c.gx, c.gz, curType, curRot);
       else if (assetOf(curType)) placeObject(c.gx, c.gz, curType, curRot);
       refresh(); scheduleSave();
@@ -405,7 +438,7 @@ document.getElementById('view').onclick = () => {
   document.getElementById('view').textContent = to2d ? '🎥 Vue 3D' : '🗺️ Vue 2D (plan)';
 };
 document.getElementById('save').onclick = () => saveNow(true);
-function refresh() { document.getElementById('count').textContent = grid.size + objects.size; }
+function refresh() { document.getElementById('count').textContent = grid.size + objects.size + halfTiles.size; }
 highlight(); refresh();
 
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.opacity = 1; setTimeout(() => t.style.opacity = 0, 1600); }
@@ -417,7 +450,8 @@ function serialize() {
   const tiles = [], objs = [];
   for (const [k, e] of grid) { const [gx, gz] = k.split('_').map(Number); tiles.push({ gx, gz, type: e.type, rot: e.rot }); }
   for (const e of objects.values()) objs.push({ gx: e.gx, gz: e.gz, ox: e.ox, oz: e.oz, type: e.type, rot: e.rot, pid: e.pid, axis: e.axis, side: e.side });
-  return { tiles, objects: objs, objScale, objOff, train: curTrain };
+  const halfs = []; for (const e of halfTiles.values()) halfs.push({ x: e.x, z: e.z, type: e.type, rot: e.rot });
+  return { tiles, objects: objs, halfs, objScale, objOff, train: curTrain };
 }
 async function saveNow(manual) {
   const data = serialize();
@@ -436,6 +470,7 @@ async function load() {
   if (data && data.train && TRAIN_PRESETS[data.train]) { curTrain = data.train; const ts = document.getElementById('trainSel'); if (ts) ts.value = curTrain; }   // type de train sauvegardé
   if (data && data.tiles) for (const t of data.tiles) if (ASSET[t.type]) placeTile(t.gx, t.gz, t.type, t.rot || 0);
   if (data && data.objects) { pendingObjects = data.objects.slice(); for (const o of pendingObjects) if (o.pid) pairSeq = Math.max(pairSeq, o.pid); placeReady(); }   // les maisons se posent au fur et à mesure du chargement des modèles (pairSeq > pids chargés pour éviter les collisions)
+  if (data && data.halfs) for (const h of data.halfs) if (ASSET[h.type]) { const mesh = ASSET[h.type].clone(true); mesh.position.set(h.x, 0, h.z); mesh.rotation.y = (h.rot || 0) * Math.PI / 2; worldGroup.add(mesh); halfTiles.set(h.x + '_' + h.z, { type: h.type, x: h.x, z: h.z, rot: h.rot || 0, mesh }); }   // demi-blocs
   refresh();
 }
 load();
@@ -503,7 +538,8 @@ trainSel.value = curTrain;
 trainSel.onchange = () => { curTrain = trainSel.value; rebuildTrains(); scheduleSave(); };
 
 // hook de test (inoffensif)
-window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); } };
+window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); },
+  placeHalfXZ: (x, z, type, rot) => { const sx = Math.round(x / HG) * HG, sz = Math.round(z / HG) * HG, k = sx + '_' + sz; const m = ASSET[type].clone(true); m.position.set(sx, 0, sz); m.rotation.y = (rot || 0) * Math.PI / 2; worldGroup.add(m); halfTiles.set(k, { type, x: sx, z: sz, rot: rot || 0, mesh: m }); } };
 
 // ---------- Boucle ----------
 let _lt = 0;
