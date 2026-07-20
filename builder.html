@@ -283,6 +283,11 @@ let curType = 'route', curRot = 0, eraseMode = false, moveMode = false, grabbed 
 
 function key(gx, gz) { return gx + '_' + gz; }
 function placeTile(gx, gz, type, rot) {
+  const ex = grid.get(key(gx, gz));
+  if (ex) {   // AUTO passage à niveau : route posée sur un rail (ou l'inverse) → croisement combiné automatique
+    if (type === 'route' && (ex.type === 'rail' || ex.type === 'rail_meshy')) { type = 'passage'; rot = ex.rot; }
+    else if ((type === 'rail' || type === 'rail_meshy') && ex.type === 'route') { type = 'passage'; }
+  }
   removeTile(gx, gz);
   const mesh = ASSET[type].clone(true);
   mesh.position.set(gx * T, 0, gz * T); mesh.rotation.y = rot * Math.PI / 2;
