@@ -405,20 +405,22 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   updateGhost(e);
 });
 renderer.domElement.addEventListener('pointerup', (e) => {
-  if (playMode) return;
-  if (grabbed) { grabbed = null; ctr.enabled = true; scheduleSave(); downXY = null; return; }   // fin du déplacement
-  const c = cellUnder(e);
-  if (!moveMode && !dragged && c) {
-    if (e.button === 2) { eraseAt(e, c.gx, c.gz); refresh(); scheduleSave(); }   // clic droit SANS glisser = supprimer l'objet/le bloc sous le curseur (2D et 3D)
-    else if (e.button === 0 && (eraseMode || curType)) {
-      if (eraseMode) eraseAt(e, c.gx, c.gz);
-      else if (TILES[curType] && TILES[curType].half) placeHalf(e, curType, curRot);
-      else if (kindOf(curType) === 'tile') placeTile(c.gx, c.gz, curType, curRot);
-      else if (assetOf(curType)) placeObject(c.gx, c.gz, curType, curRot);
-      refresh(); scheduleSave();
+  if (playMode) { downXY = null; dragged = false; return; }
+  try {
+    if (grabbed) { grabbed = null; ctr.enabled = true; scheduleSave(); return; }   // fin du déplacement
+    const c = cellUnder(e);
+    if (!moveMode && !dragged && c) {
+      if (e.button === 2) { eraseAt(e, c.gx, c.gz); refresh(); scheduleSave(); }   // clic droit SANS glisser = supprimer l'objet/le bloc sous le curseur (2D et 3D)
+      else if (e.button === 0 && (eraseMode || curType)) {
+        if (eraseMode) eraseAt(e, c.gx, c.gz);
+        else if (TILES[curType] && TILES[curType].half) placeHalf(e, curType, curRot);
+        else if (kindOf(curType) === 'tile') placeTile(c.gx, c.gz, curType, curRot);
+        else if (assetOf(curType)) placeObject(c.gx, c.gz, curType, curRot);
+        refresh(); scheduleSave();
+      }
     }
-  }
-  downXY = null;
+  } catch (err) { console.error('pose:', err); }
+  finally { downXY = null; dragged = false; grabbed = null; }   // TOUJOURS réinitialiser (plus jamais bloqué)
 });
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());   // pas de menu navigateur ; suppression gérée au relâchement (un clic droit GLISSÉ = pan de vue, ne supprime pas)
 addEventListener('keydown', (e) => { if ((e.key === 'r' || e.key === 'R') && !playMode) rotateAction(); });
@@ -482,7 +484,7 @@ function toast(msg, dur) { const t = document.getElementById('toast'); t.textCon
 
 // ---------- Sauvegarde / chargement (Supabase, id=2) ----------
 let saveT = null;
-function scheduleSave() { clearTimeout(saveT); saveT = setTimeout(() => saveNow(false), 900); }
+function scheduleSave() { if (window.__noSave) return; clearTimeout(saveT); saveT = setTimeout(() => saveNow(false), 900); }
 function serialize() {
   const tiles = [], objs = [];
   for (const [k, e] of grid) { const [gx, gz] = k.split('_').map(Number); tiles.push({ gx, gz, type: e.type, rot: e.rot }); }
@@ -491,6 +493,7 @@ function serialize() {
   return { tiles, objects: objs, halfs, objScale, objOff, train: curTrain };
 }
 async function saveNow(manual) {
+  if (window.__noSave) return;
   const data = serialize();
   try {
     const r = await fetch(SB_URL + '/rest/v1/wispy_layout', { method: 'POST', headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ id: LAYOUT_ID, data }) });
