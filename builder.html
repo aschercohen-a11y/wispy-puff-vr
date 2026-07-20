@@ -52,6 +52,10 @@
     <button id="view" class="act">🗺️ Vue 2D (plan)</button>
   </div>
   <div class="grp">
+    <div class="lbl">🚂 Type de train</div>
+    <select id="trainSel" style="width:100%;box-sizing:border-box;padding:7px;border-radius:6px;background:#123;color:#dff;border:1px solid #6fd;font-size:13px"></select>
+  </div>
+  <div class="grp">
     <button id="save" class="act">💾 Sauvegarder</button>
   </div>
 </div>
@@ -131,6 +135,19 @@ function buildRail() {   // voie ferrée : ballast + traverses bois + 2 rails ac
   for (const z of [-1, 1]) { const r = new THREE.Mesh(new THREE.BoxGeometry(T, 0.12, 0.16), steelM); r.position.set(0, 0.12, z); g.add(r); }                       // 2 rails (écartement 2)
   return g;
 }
+function buildPassage() {   // PASSAGE À NIVEAU : rails le long de X qui traversent une route le long de Z
+  const g = new THREE.Group();
+  g.add(plane(ROAD_W, T, ASPH, 0.02));                                    // chaussée perpendiculaire (le long de Z)
+  for (const sgn of [-1, 1]) g.add(sidewalk(SIDE_W, T, sgn * SIDE_Z, 0)); // trottoirs de la route
+  for (const zc of [-1, 1]) for (let z = -HALF + 1.25; z < HALF; z += 2.5) g.add(plane(0.16, 1.2, LINE, 0.023, zc, z));   // pointillés de la route
+  const woodM = new THREE.MeshBasicMaterial({ color: 0x6b4a2f });
+  for (const sx of [-1, 1]) for (let x = ROAD_W / 2 + 0.7; x < HALF; x += 1.4) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.1, 3), woodM); s.position.set(sx * x, 0.05, 0); g.add(s); }   // traverses hors chaussée
+  const steelM = new THREE.MeshBasicMaterial({ color: 0x8a8f96 });
+  for (const z of [-1, 1]) { const r = new THREE.Mesh(new THREE.BoxGeometry(T, 0.14, 0.16), steelM); r.position.set(0, 0.16, z); g.add(r); }   // rails qui traversent (le long de X)
+  const warn = new THREE.MeshBasicMaterial({ color: 0xe9e4d2 });
+  for (const z of [-2.6, 2.6]) { const b = new THREE.Mesh(new THREE.BoxGeometry(ROAD_W - 0.4, 0.02, 0.3), warn); b.position.set(0, 0.17, z); g.add(b); }   // bandes d'avertissement
+  return g;
+}
 function buildPrairie() {
   const g = new THREE.Group(); g.add(freshGrass());
   const b = plane(T, T, new THREE.MeshBasicMaterial({ color: 0x4f7a3a, wireframe: true }), 0.006); g.add(b);   // léger liseré (repère de tuile)
@@ -176,6 +193,7 @@ function buildTe() {   // embranchement en T : route horizontale complète + un 
 const TILES = {
   route:     { label: '🛣️ Route droite', build: buildRoute },
   rail:      { label: '🚂 Rail droit',   build: buildRail },
+  passage:   { label: '🚦 Passage à niveau', build: buildPassage },
   carrefour: { label: '➕ Carrefour',     build: buildCarrefour },
   prairie:   { label: '🌳 Prairie',       build: buildPrairie },
   // virage/Té : à finaliser prochainement (buildVirage / buildTe prêts mais pas encore assez propres)
@@ -241,9 +259,9 @@ function placeTile(gx, gz, type, rot) {
   const mesh = ASSET[type].clone(true);
   mesh.position.set(gx * T, 0, gz * T); mesh.rotation.y = rot * Math.PI / 2;
   worldGroup.add(mesh); grid.set(key(gx, gz), { type, rot, mesh });
-  if (type === 'rail') scheduleTrains();
+  if (type === 'rail' || type === 'passage') scheduleTrains();
 }
-function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { const wasRail = e.type === 'rail'; worldGroup.remove(e.mesh); grid.delete(key(gx, gz)); if (wasRail) scheduleTrains(); } }
+function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { const wasRail = e.type === 'rail' || e.type === 'passage'; worldGroup.remove(e.mesh); grid.delete(key(gx, gz)); if (wasRail) scheduleTrains(); } }
 let objId = 0, pairSeq = 0;
 function addObject(type, gx, gz, ox, oz, rot, meta) {   // pose 1 objet précis (id unique → suppressible seul)
   const a = OBJ_ASSET[type]; if (!a) return;
@@ -389,7 +407,7 @@ function serialize() {
   const tiles = [], objs = [];
   for (const [k, e] of grid) { const [gx, gz] = k.split('_').map(Number); tiles.push({ gx, gz, type: e.type, rot: e.rot }); }
   for (const e of objects.values()) objs.push({ gx: e.gx, gz: e.gz, ox: e.ox, oz: e.oz, type: e.type, rot: e.rot, pid: e.pid, axis: e.axis, side: e.side });
-  return { tiles, objects: objs, objScale, objOff };
+  return { tiles, objects: objs, objScale, objOff, train: curTrain };
 }
 async function saveNow(manual) {
   const data = serialize();
@@ -405,6 +423,7 @@ async function load() {
   if (!data) { try { data = JSON.parse(localStorage.getItem('wispy_tiles') || 'null'); } catch (e) {} }
   if (data && data.objScale) Object.assign(objScale, data.objScale);   // tailles réglées, appliquées dès la pose
   if (data && data.objOff) Object.assign(objOff, data.objOff);         // écarts réglés
+  if (data && data.train && TRAIN_PRESETS[data.train]) { curTrain = data.train; const ts = document.getElementById('trainSel'); if (ts) ts.value = curTrain; }   // type de train sauvegardé
   if (data && data.tiles) for (const t of data.tiles) if (ASSET[t.type]) placeTile(t.gx, t.gz, t.type, t.rot || 0);
   if (data && data.objects) { pendingObjects = data.objects.slice(); for (const o of pendingObjects) if (o.pid) pairSeq = Math.max(pairSeq, o.pid); placeReady(); }   // les maisons se posent au fur et à mesure du chargement des modèles (pairSeq > pids chargés pour éviter les collisions)
   refresh();
@@ -413,7 +432,14 @@ load();
 
 // ---------- TRAINS (Kenney) qui roulent sur les tuiles Rail horizontales ----------
 const TRAIN_SCALE = 1.5, TRAIN_Y = 0.12;
-const TRAIN_FILES = { loco: 'train-loco', wag1: 'train-wag1', wag2: 'train-wag2', wag3: 'train-wag3', wag4: 'train-wag4' };
+const TRAIN_FILES = { loco: 'train-loco', wag1: 'train-wag1', wag2: 'train-wag2', wag3: 'train-wag3', wag4: 'train-wag4', diesel: 'train-diesel', tram: 'train-tram', bulletA: 'train-bulletA', bulletB: 'train-bulletB', bulletC: 'train-bulletC' };
+const TRAIN_PRESETS = {
+  vapeur: { label: '🚂 Vapeur', cars: ['loco', 'wag1', 'wag2', 'wag3', 'wag4'] },
+  diesel: { label: '🚆 Diesel', cars: ['diesel', 'wag2', 'wag3', 'wag1', 'wag4'] },
+  tgv:    { label: '🚄 TGV',    cars: ['bulletA', 'bulletB', 'bulletB', 'bulletC'] },
+  tram:   { label: '🚋 Tram',   cars: ['tram', 'tram'] },
+};
+let curTrain = 'vapeur';
 const TRAIN_ASSET = {};
 function prepCar(root) {
   unlit(root); root.rotation.y = -Math.PI / 2;                         // longueur (Z du modèle) alignée sur X, face +X
@@ -425,24 +451,34 @@ function prepCar(root) {
 }
 const gltf2 = new GLTFLoader();
 for (const k in TRAIN_FILES) gltf2.load('models/' + TRAIN_FILES[k] + '.glb', (g) => { TRAIN_ASSET[k] = prepCar(g.scene); scheduleTrains(); });
-function buildConsist() {   // loco à l'avant (x=0) + wagons derrière (x<0)
-  const g = new THREE.Group(), order = ['loco', 'wag1', 'wag2', 'wag3', 'wag4']; let x = 0, first = true;
+function buildConsist() {   // loco à l'avant (x=0) + wagons derrière (x<0), selon le type choisi
+  const g = new THREE.Group(), order = (TRAIN_PRESETS[curTrain] || TRAIN_PRESETS.vapeur).cars; let x = 0, first = true;
   for (const c of order) { const car = TRAIN_ASSET[c]; if (!car) continue; if (!first) x -= 0.2; const inst = car.wrap.clone(true); inst.position.x = x - car.len / 2; g.add(inst); x -= car.len; first = false; }
   g.scale.setScalar(TRAIN_SCALE); return { group: g, length: -x * TRAIN_SCALE };
 }
 let trains = [], trainsT = null;
 function clearTrains() { for (const t of trains) scene.remove(t.group); trains = []; }
 function scheduleTrains() { clearTimeout(trainsT); trainsT = setTimeout(rebuildTrains, 150); }
+function spawnTrain(axis, coords, fixed) {   // axis 'x' = voie horizontale, 'z' = voie verticale
+  const minc = Math.min(...coords) * T - T / 2, maxc = Math.max(...coords) * T + T / 2, c = buildConsist();
+  if (axis === 'x') c.group.position.set(minc - c.length, TRAIN_Y, fixed * T);
+  else { c.group.rotation.y = -Math.PI / 2; c.group.position.set(fixed * T, TRAIN_Y, minc - c.length); }
+  scene.add(c.group);
+  trains.push({ group: c.group, axis, len: c.length, min: minc - c.length, max: maxc, p: minc - c.length, speed: 7 });
+}
 function rebuildTrains() {
   clearTrains(); if (!TRAIN_ASSET.loco) return;
-  const rows = {};   // rangées de rails horizontaux (rot pair) groupées par gz (gx/gz lus depuis la clé)
-  for (const [k, e] of grid) if (e.type === 'rail' && e.rot % 2 === 0) { const [gx, gz] = k.split('_').map(Number); (rows[gz] = rows[gz] || []).push(gx); }
-  for (const gz in rows) {
-    const gxs = rows[gz], minx = Math.min(...gxs) * T - T / 2, maxx = Math.max(...gxs) * T + T / 2;
-    const c = buildConsist(); c.group.position.set(minx - c.length, TRAIN_Y, Number(gz) * T); scene.add(c.group);
-    trains.push({ group: c.group, len: c.length, xMin: minx - c.length, xMax: maxx, x: minx - c.length, speed: 7 });
-  }
+  const H = {}, V = {};   // rails/passages : rangées horizontales (rot pair) par gz, colonnes verticales (rot impair) par gx
+  for (const [k, e] of grid) if (e.type === 'rail' || e.type === 'passage') { const [gx, gz] = k.split('_').map(Number); if (e.rot % 2 === 0) (H[gz] = H[gz] || []).push(gx); else (V[gx] = V[gx] || []).push(gz); }
+  for (const gz in H) spawnTrain('x', H[gz], Number(gz));
+  for (const gx in V) spawnTrain('z', V[gx], Number(gx));
 }
+
+// sélecteur de type de train (peuplé ici, après TRAIN_PRESETS)
+const trainSel = document.getElementById('trainSel');
+for (const k in TRAIN_PRESETS) { const o = document.createElement('option'); o.value = k; o.textContent = TRAIN_PRESETS[k].label; trainSel.appendChild(o); }
+trainSel.value = curTrain;
+trainSel.onchange = () => { curTrain = trainSel.value; rebuildTrains(); scheduleSave(); };
 
 // hook de test (inoffensif)
 window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains };
@@ -451,7 +487,7 @@ window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, reb
 let _lt = 0;
 renderer.setAnimationLoop((t) => {
   const dt = _lt ? Math.min(0.05, (t - _lt) / 1000) : 0.016; _lt = t;
-  for (const tr of trains) { tr.x += tr.speed * dt; if (tr.x > tr.xMax + tr.len) tr.x = tr.xMin; tr.group.position.x = tr.x; }   // le train roule et boucle
+  for (const tr of trains) { tr.p += tr.speed * dt; if (tr.p > tr.max + tr.len) tr.p = tr.min; if (tr.axis === 'x') tr.group.position.x = tr.p; else tr.group.position.z = tr.p; }   // le train roule le long de sa voie (X ou Z) et boucle
   ctr.update(); renderer.render(scene, cam);
 });
 </script>
