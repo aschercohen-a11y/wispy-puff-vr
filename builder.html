@@ -184,7 +184,14 @@ const HOUSES = {
   tree:     { label: '🌳 Arbre',         file: 'pp_tree',         foot: 5 },
   lamp:     { label: '🏮 Lampadaire',    file: 'lamp',            foot: 2.4 },
 };
-const OBJ_ASSET = {};   // assets de la couche OBJETS : maisons GLB + déco procédurale
+const BUILDINGS = {   // grands bâtiments Meshy (optimisés : ~50k tris, ~1 MB)
+  immeuble1: { label: '🏢 Immeuble épicerie', file: 'immeuble1', foot: 13 },
+  immeuble2: { label: '💐 Immeuble fleuriste', file: 'immeuble2', foot: 13 },
+  immeuble3: { label: '☕ Immeuble café',      file: 'immeuble3', foot: 13 },
+  station:   { label: '⛽ Station service',    file: 'station',   foot: 14 },
+  parc:      { label: '🏞️ Parc',               file: 'parc',      foot: 18 },
+};
+const OBJ_ASSET = {};   // assets de la couche OBJETS : maisons GLB + immeubles + déco procédurale
 function unlit(root) { root.traverse(m => { if (!m.isMesh || !m.material) return; const conv = (s) => { if (s.map) s.map.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshBasicMaterial({ map: s.map || null, color: s.map ? 0xffffff : (s.color ? s.color.clone() : new THREE.Color(0xffffff)), side: THREE.DoubleSide, transparent: !!s.transparent, opacity: s.opacity != null ? s.opacity : 1 }); }; m.material = Array.isArray(m.material) ? m.material.map(conv) : conv(m.material); }); }
 function fitObject(root, foot) { root.updateMatrixWorld(true); let b = new THREE.Box3().setFromObject(root); const w = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) || 1; root.scale.setScalar(foot / w); root.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(root); root.position.y = -b.min.y; const g = new THREE.Group(); g.add(root); return g; }
 // ---------- Déco procédurale ----------
@@ -202,8 +209,8 @@ function buildAllee() {   // petit chemin pavé + 2 piliers + haies (mène de la
 const DECO = { allee: { label: '🚪 Allée / entrée' } };
 OBJ_ASSET.allee = buildAllee();
 const gltf = new GLTFLoader();
-for (const k in HOUSES) { const h = HOUSES[k]; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); OBJ_ASSET[k] = fitObject(g.scene, h.foot || 9); const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) btn.disabled = false; placeReady(); }); }
-function kindOf(t) { return TILES[t] ? 'tile' : ((HOUSES[t] || DECO[t]) ? 'object' : null); }
+for (const src of [HOUSES, BUILDINGS]) for (const k in src) { const h = src[k]; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); OBJ_ASSET[k] = fitObject(g.scene, h.foot || 9); const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) btn.disabled = false; placeReady(); }); }
+function kindOf(t) { return TILES[t] ? 'tile' : ((HOUSES[t] || BUILDINGS[t] || DECO[t]) ? 'object' : null); }
 function assetOf(t) { return TILES[t] ? ASSET[t] : OBJ_ASSET[t]; }
 
 // ---------- État de la carte ----------
@@ -326,12 +333,12 @@ addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') { curRo
 
 // ---------- UI : palette en rubriques repliables ----------
 const pal = document.getElementById('pal');
-const CATS = [{ name: '🛣️ Routes', items: TILES, open: true }, { name: '🏠 Maisons', items: HOUSES, open: false }, { name: '🌿 Déco', items: DECO, open: false }];
+const CATS = [{ name: '🛣️ Routes', items: TILES, open: true }, { name: '🏠 Maisons', items: HOUSES, open: false }, { name: '🏢 Immeubles & lieux', items: BUILDINGS, open: false }, { name: '🌿 Déco', items: DECO, open: false }];
 for (const cat of CATS) {
   const wrap = document.createElement('div'); wrap.className = 'cat' + (cat.open ? ' open' : '');
   const head = document.createElement('div'); head.className = 'head'; head.innerHTML = '<span>' + cat.name + '</span><span class="arw">▸</span>'; head.onclick = () => wrap.classList.toggle('open');
   const body = document.createElement('div'); body.className = 'body';
-  for (const k in cat.items) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = cat.items[k].label; b.dataset.t = k; if (cat.items === HOUSES && !OBJ_ASSET[k]) b.disabled = true; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; body.appendChild(b); }
+  for (const k in cat.items) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = cat.items[k].label; b.dataset.t = k; if ((cat.items === HOUSES || cat.items === BUILDINGS) && !OBJ_ASSET[k]) b.disabled = true; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; body.appendChild(b); }
   wrap.appendChild(head); wrap.appendChild(body); pal.appendChild(wrap);
 }
 function highlight() { for (const b of pal.querySelectorAll('button.tile')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; updateSizeCtl(); updateModeBtns(); }
