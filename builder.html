@@ -582,6 +582,35 @@ function rebuildTrains() {
   for (const [k, e] of grid) if (e.type === 'rail' || e.type === 'passage' || e.type === 'rail_meshy') { const [gx, gz] = k.split('_').map(Number); if (e.rot % 2 === 0) (H[gz] = H[gz] || []).push(gx); else (V[gx] = V[gx] || []).push(gz); }
   for (const gz in H) spawnTrain('x', H[gz], Number(gz));
   for (const gx in V) spawnTrain('z', V[gx], Number(gx));
+  rebuildBarriers();
+}
+
+// ---------- BARRIÈRES de passage à niveau (bras Meshy + poteau, se baissent quand le train approche) ----------
+let BARRIER_ARM = null, barriers = [];
+new GLTFLoader().load('models/barrier_train.glb', (g) => {
+  unlit(g.scene); const root = g.scene; root.updateMatrixWorld(true);
+  let b = new THREE.Box3().setFromObject(root); root.scale.setScalar(5.5 / ((b.max.x - b.min.x) || 1));
+  root.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(root);
+  root.position.x -= b.min.x; root.position.y -= (b.min.y + b.max.y) / 2; root.position.z -= (b.min.z + b.max.z) / 2;   // pivot au bout (contrepoids), le bras s'étend vers +X
+  BARRIER_ARM = new THREE.Group(); BARRIER_ARM.add(root); scheduleTrains();
+});
+function makeBarrier(px, pz, roadAlong, dir) {
+  const g = new THREE.Group(), H = 1.5, OFF = 5.5;
+  let postX = px, postZ = pz, aimY = 0;
+  if (roadAlong === 'z') { postX = px + OFF * dir; aimY = dir > 0 ? Math.PI : 0; }        // route en Z : poteaux à x=±5.5, bras vers le centre
+  else { postZ = pz + OFF * dir; aimY = dir > 0 ? -Math.PI / 2 : Math.PI / 2; }            // route en X : poteaux à z=±5.5
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.16, H, 8), new THREE.MeshBasicMaterial({ color: 0xdadada })); post.position.set(postX, H / 2, postZ); g.add(post);
+  const pivot = new THREE.Group(); pivot.position.set(postX, H, postZ); pivot.rotation.y = aimY;
+  const lift = new THREE.Group(); pivot.add(lift); lift.add(BARRIER_ARM.clone(true)); g.add(pivot);
+  return { group: g, lift, angle: 1.45, target: 1.45, px, pz };   // 1.45 = levé (vertical) ; 0 = baissé (horizontal)
+}
+function rebuildBarriers() {
+  for (const bar of barriers) scene.remove(bar.group); barriers = [];
+  if (!BARRIER_ARM) return;
+  for (const [k, e] of grid) if (e.type === 'passage') {
+    const [gx, gz] = k.split('_').map(Number), roadAlong = (e.rot % 2 === 0) ? 'z' : 'x';
+    for (const dir of [-1, 1]) { const bar = makeBarrier(gx * T, gz * T, roadAlong, dir); scene.add(bar.group); barriers.push(bar); }
+  }
 }
 
 // sélecteur de type de train (peuplé ici, après TRAIN_PRESETS)
@@ -621,13 +650,25 @@ addEventListener('keyup', (e) => { pk[e.key.toLowerCase()] = false; });
 
 // hook de test (inoffensif)
 window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); }, togglePlay,
-  placeHalfXZ: (x, z, type, rot) => { const sx = Math.round(x / HG) * HG, sz = Math.round(z / HG) * HG, k = sx + '_' + sz; const m = ASSET[type].clone(true); m.position.set(sx, 0, sz); m.rotation.y = (rot || 0) * Math.PI / 2; worldGroup.add(m); halfTiles.set(k, { type, x: sx, z: sz, rot: rot || 0, mesh: m }); } };
+  placeHalfXZ: (x, z, type, rot) => { const sx = Math.round(x / HG) * HG, sz = Math.round(z / HG) * HG, k = sx + '_' + sz; const m = ASSET[type].clone(true); m.position.set(sx, 0, sz); m.rotation.y = (rot || 0) * Math.PI / 2; worldGroup.add(m); halfTiles.set(k, { type, x: sx, z: sz, rot: rot || 0, mesh: m }); },
+  barrierInfo: () => ({ armLoaded: !!BARRIER_ARM, count: barriers.length, sample: barriers[0] ? { px: barriers[0].px, pz: barriers[0].pz, angle: +barriers[0].angle.toFixed(2), gpos: barriers[0].group.position.toArray().map(v => +v.toFixed(1)) } : null }) };
 
 // ---------- Boucle ----------
 let _lt = 0;
 renderer.setAnimationLoop((t) => {
   const dt = _lt ? Math.min(0.05, (t - _lt) / 1000) : 0.016; _lt = t;
   for (const tr of trains) { tr.p += tr.speed * dt; if (tr.p > tr.max + tr.len) tr.p = tr.min; if (tr.axis === 'x') tr.group.position.x = tr.p; else tr.group.position.z = tr.p; }   // le train roule le long de sa voie (X ou Z) et boucle
+  for (const bar of barriers) {   // barrière baissée si un train approche du passage
+    let near = false;
+    for (const tr of trains) {
+      if (tr.axis === 'x') { if (Math.abs(tr.group.position.z - bar.pz) < 8 && bar.px < tr.p + 22 && bar.px > tr.p - tr.len - 4) near = true; }
+      else { if (Math.abs(tr.group.position.x - bar.px) < 8 && bar.pz < tr.p + 22 && bar.pz > tr.p - tr.len - 4) near = true; }
+      if (near) break;
+    }
+    bar.target = near ? 0 : 1.45;
+    bar.angle += (bar.target - bar.angle) * Math.min(1, dt * 3);
+    bar.lift.rotation.z = bar.angle;
+  }
   if (playMode && hero) {
     let mx = 0, mz = 0;
     if (pk['z'] || pk['w'] || pk['arrowup']) mz += 1;
