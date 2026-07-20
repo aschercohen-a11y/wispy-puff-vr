@@ -441,13 +441,14 @@ async function load() {
 load();
 
 // ---------- TRAINS (Kenney) qui roulent sur les tuiles Rail horizontales ----------
-const TRAIN_SCALE = 1.5, TRAIN_Y = 0.12;
+const TARGET_W = 2.2, TRAIN_Y = 0.12;   // largeur cible (écartement des rails) — tous les trains normalisés à ça
 const TRAIN_FILES = {
   loco: 'train-loco', wag1: 'train-wag1', wag2: 'train-wag2', wag3: 'train-wag3', wag4: 'train-wag4',
   diesel: 'train-diesel', tram: 'train-tram', bulletA: 'train-bulletA', bulletB: 'train-bulletB', bulletC: 'train-bulletC',
   subwayA: 'train-subwayA', subwayB: 'train-subwayB', subwayC: 'train-subwayC',
   cityA: 'train-cityA', cityB: 'train-cityB', cityC: 'train-cityC',
   doubleA: 'train-doubleA', doubleB: 'train-doubleB', doubleC: 'train-doubleC',
+  tramMeshy: 'train_meshy',
 };
 const TRAIN_PRESETS = {
   vapeur: { label: '🚂 Vapeur', cars: ['loco', 'wag1', 'wag2', 'wag3', 'wag4'] },
@@ -457,15 +458,17 @@ const TRAIN_PRESETS = {
   city:   { label: '🚈 City',   cars: ['cityA', 'cityB', 'cityB', 'cityC'] },
   double: { label: '🚊 Double', cars: ['doubleA', 'doubleB', 'doubleB', 'doubleC'] },
   tram:   { label: '🚋 Tram',   cars: ['tram', 'tram'] },
+  meshy:  { label: '🚋 Tram Meshy (le tien)', cars: ['tramMeshy'] },
 };
 let curTrain = 'vapeur';
 const TRAIN_ASSET = {};
 function prepCar(root) {
-  unlit(root); root.rotation.y = -Math.PI / 2;                         // longueur (Z du modèle) alignée sur X, face +X
-  const wrap = new THREE.Group(); wrap.add(root); wrap.updateMatrixWorld(true);
-  let b = new THREE.Box3().setFromObject(wrap);
-  root.position.x -= (b.min.x + b.max.x) / 2; root.position.y -= b.min.y;   // centré en X, base à 0
-  wrap.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(wrap);
+  unlit(root); root.updateMatrixWorld(true);
+  let b = new THREE.Box3().setFromObject(root);
+  if ((b.max.z - b.min.z) > (b.max.x - b.min.x)) { root.rotation.y = -Math.PI / 2; root.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(root); }   // oriente la LONGUEUR sur X
+  const sc = TARGET_W / ((b.max.z - b.min.z) || 1); root.scale.setScalar(sc); root.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(root);   // normalise la largeur = écartement rails
+  root.position.x -= (b.min.x + b.max.x) / 2; root.position.z -= (b.min.z + b.max.z) / 2; root.position.y -= b.min.y;   // centré, base à 0
+  const wrap = new THREE.Group(); wrap.add(root); wrap.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(wrap);
   return { wrap, len: b.max.x - b.min.x };
 }
 const gltf2 = new GLTFLoader();
@@ -473,7 +476,7 @@ for (const k in TRAIN_FILES) gltf2.load('models/' + TRAIN_FILES[k] + '.glb', (g)
 function buildConsist() {   // loco à l'avant (x=0) + wagons derrière (x<0), selon le type choisi
   const g = new THREE.Group(), order = (TRAIN_PRESETS[curTrain] || TRAIN_PRESETS.vapeur).cars; let x = 0, first = true;
   for (const c of order) { const car = TRAIN_ASSET[c]; if (!car) continue; if (!first) x -= 0.2; const inst = car.wrap.clone(true); inst.position.x = x - car.len / 2; g.add(inst); x -= car.len; first = false; }
-  g.scale.setScalar(TRAIN_SCALE); return { group: g, length: -x * TRAIN_SCALE };
+  return { group: g, length: -x };   // voitures déjà normalisées (largeur = écartement rails)
 }
 let trains = [], trainsT = null;
 function clearTrains() { for (const t of trains) scene.remove(t.group); trains = []; }
@@ -500,7 +503,7 @@ trainSel.value = curTrain;
 trainSel.onchange = () => { curTrain = trainSel.value; rebuildTrains(); scheduleSave(); };
 
 // hook de test (inoffensif)
-window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains };
+window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); } };
 
 // ---------- Boucle ----------
 let _lt = 0;
