@@ -47,6 +47,16 @@
       <div class="lbl" style="margin-top:8px">Écart à la route (paire)</div>
       <div class="row2"><button id="offM" class="act" style="flex:1">⟵ route</button><button id="offP" class="act" style="flex:1">bord ⟶</button></div>
     </div>
+    <div id="heightBox" style="display:none">
+      <div class="lbl" style="margin-top:8px">Hauteur (enfoncer / relever)</div>
+      <div class="row2"><button id="dnBtn" class="act" style="flex:1">⬇️ Descendre</button><button id="upBtn" class="act" style="flex:1">⬆️ Monter</button></div>
+    </div>
+    <div id="lakeBox" style="display:none">
+      <div class="lbl" style="margin-top:8px">💧 Eau du lac — niveau</div>
+      <div class="row2"><button id="wlDn" class="act" style="flex:1">niveau ⬇️</button><button id="wlUp" class="act" style="flex:1">niveau ⬆️</button></div>
+      <div class="lbl" style="margin-top:6px">💧 Eau — taille</div>
+      <div class="row2"><button id="wsM" class="act" style="flex:1">eau ➖</button><button id="wsP" class="act" style="flex:1">eau ➕</button></div>
+    </div>
   </div>
   <div class="grp">
     <div class="lbl">Outils</div>
@@ -254,8 +264,8 @@ function addLakeWater(grp) {
   grp.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(grp);
   const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
   const R = Math.min(bb.max.x - bb.min.x, bb.max.z - bb.min.z) * 0.43, wy = bb.min.y + (bb.max.y - bb.min.y) * 0.58;   // rayon large (remplit jusqu'aux berges) ; niveau plus haut
-  const water = new THREE.Mesh(new THREE.CircleGeometry(R, 44), new THREE.MeshBasicMaterial({ color: 0x2f8fd0, transparent: true, opacity: 0.82, side: THREE.DoubleSide })); water.rotation.x = -Math.PI / 2; water.position.set(cx, wy, cz);
-  const rip = new THREE.Mesh(new THREE.CircleGeometry(R * 0.98, 44), new THREE.MeshBasicMaterial({ map: LAKE_RIPPLE, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide })); rip.rotation.x = -Math.PI / 2; rip.position.set(cx, wy + 0.02, cz);
+  const water = new THREE.Mesh(new THREE.CircleGeometry(R, 44), new THREE.MeshBasicMaterial({ color: 0x2f8fd0, transparent: true, opacity: 0.82, side: THREE.DoubleSide })); water.rotation.x = -Math.PI / 2; water.position.set(cx, wy, cz); water.userData.lakeWater = true;
+  const rip = new THREE.Mesh(new THREE.CircleGeometry(R * 0.98, 44), new THREE.MeshBasicMaterial({ map: LAKE_RIPPLE, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide })); rip.rotation.x = -Math.PI / 2; rip.position.set(cx, wy + 0.02, cz); rip.userData.lakeWater = true;
   grp.add(water); grp.add(rip);
 }
 // ---------- Déco procédurale ----------
@@ -321,12 +331,15 @@ function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { const wa
 let objId = 0, pairSeq = 0;
 function addObject(type, gx, gz, ox, oz, rot, meta) {   // pose 1 objet précis (id unique → suppressible seul)
   const a = OBJ_ASSET[type]; if (!a) return;
-  const sc = (meta && meta.sc) || 1;
-  const mesh = a.clone(true); mesh.position.set(gx * T + ox, OBJ_Y, gz * T + oz); mesh.rotation.y = rot * Math.PI / 2; mesh.scale.setScalar(scaleFor(type) * sc);
+  const sc = (meta && meta.sc) || 1, dy = (meta && meta.dy) || 0;
+  const mesh = a.clone(true); mesh.position.set(gx * T + ox, OBJ_Y + dy, gz * T + oz); mesh.rotation.y = rot * Math.PI / 2; mesh.scale.setScalar(scaleFor(type) * sc);
   const id = ++objId; mesh.userData.objId = id; worldGroup.add(mesh);
-  objects.set(id, { id, type, gx, gz, ox, oz, rot, mesh, sc, pid: meta && meta.pid, axis: meta && meta.axis, side: meta && meta.side });
+  const rec = { id, type, gx, gz, ox, oz, rot, mesh, sc, dy, pid: meta && meta.pid, axis: meta && meta.axis, side: meta && meta.side };
+  objects.set(id, rec);
+  if (type === 'lac') { rec.waterMeshes = []; mesh.traverse(o => { if (o.userData.lakeWater) rec.waterMeshes.push({ m: o, baseY: o.position.y }); }); rec.waterDy = (meta && meta.waterDy) || 0; rec.waterScale = (meta && meta.waterScale) || 1; applyLakeWater(rec); }
 }
 function snap(v) { return Math.round(v / 0.5) * 0.5; }   // grille fine 0.5 pour aligner/espacer précisément
+function applyLakeWater(rec) { if (!rec.waterMeshes) return; const s = rec.waterScale || 1; for (const w of rec.waterMeshes) { w.m.scale.set(s, s, 1); w.m.position.y = w.baseY + (rec.waterDy || 0); } }
 function removeObjectById(id) { const e = objects.get(id); if (e) { worldGroup.remove(e.mesh); objects.delete(id); } }
 function removeObjectsInCell(gx, gz) { for (const [id, e] of [...objects]) if (e.gx === gx && e.gz === gz) removeObjectById(id); }
 function placeObject(gx, gz, type, rot) {
@@ -353,7 +366,7 @@ function eraseAt(e, gx, gz) {   // objet précis > demi-bloc (grille fine) > tui
   const w = worldPoint(e); if (w) { const k = (Math.round(w.x / HG) * HG) + '_' + (Math.round(w.z / HG) * HG); const h = halfTiles.get(k); if (h) { worldGroup.remove(h.mesh); halfTiles.delete(k); return; } }
   removeTile(gx, gz);
 }
-function placeReady() { pendingObjects = pendingObjects.filter(o => { if (OBJ_ASSET[o.type]) { addObject(o.type, o.gx, o.gz, o.ox || 0, o.oz || 0, o.rot || 0, { sc: o.sc, pid: o.pid, axis: o.axis, side: o.side }); return false; } return true; }); refresh(); }
+function placeReady() { pendingObjects = pendingObjects.filter(o => { if (OBJ_ASSET[o.type]) { addObject(o.type, o.gx, o.gz, o.ox || 0, o.oz || 0, o.rot || 0, { sc: o.sc, dy: o.dy, waterDy: o.waterDy, waterScale: o.waterScale, pid: o.pid, axis: o.axis, side: o.side }); return false; } return true; }); refresh(); }
 function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); for (const e of objects.values()) worldGroup.remove(e.mesh); for (const e of halfTiles.values()) worldGroup.remove(e.mesh); grid.clear(); objects.clear(); halfTiles.clear(); pendingObjects = []; scheduleTrains(); refresh(); }
 
 // ---------- Grille de repère + fantôme ----------
@@ -453,6 +466,8 @@ function updateSizeCtl() {
   if (isObj) document.getElementById('szV').textContent = Math.round(scaleFor(curType) * 100) + '%';
   else if (isSel) document.getElementById('szV').textContent = Math.round(scaleFor(selObj.type) * (selObj.sc || 1) * 100) + '%';
   document.getElementById('offBox').style.display = (isObj && PAIRED[curType]) ? 'block' : 'none';   // écart : seulement pour les paires (lampadaire)
+  document.getElementById('heightBox').style.display = isSel ? 'block' : 'none';                     // hauteur : objet sélectionné en mode Déplacer
+  document.getElementById('lakeBox').style.display = (isSel && selObj.type === 'lac') ? 'block' : 'none';   // eau : lac sélectionné
 }
 function applyScale(type) { for (const e of objects.values()) if (e.type === type) e.mesh.scale.setScalar(scaleFor(type) * (e.sc || 1)); if (ghost && curType === type) ghost.scale.setScalar(scaleFor(type)); }
 function bumpScale(f) {
@@ -465,6 +480,15 @@ document.getElementById('szM').onclick = () => bumpScale(0.85);
 document.getElementById('szP').onclick = () => bumpScale(1.18);
 document.getElementById('offM').onclick = () => bumpOffset(-0.6);
 document.getElementById('offP').onclick = () => bumpOffset(0.6);
+function bumpY(d) { if (!(moveMode && selObj)) return; const tg = selObj.pid ? [...objects.values()].filter(o => o.pid === selObj.pid) : [selObj]; for (const o of tg) { o.dy = (o.dy || 0) + d; o.mesh.position.y = OBJ_Y + o.dy; } scheduleSave(); }   // enfonce/relève l'objet
+function bumpWaterY(d) { if (!(moveMode && selObj && selObj.type === 'lac')) return; selObj.waterDy = (selObj.waterDy || 0) + d; applyLakeWater(selObj); scheduleSave(); }
+function bumpWaterS(f) { if (!(moveMode && selObj && selObj.type === 'lac')) return; selObj.waterScale = Math.min(2, Math.max(0.3, (selObj.waterScale || 1) * f)); applyLakeWater(selObj); scheduleSave(); }
+document.getElementById('dnBtn').onclick = () => bumpY(-0.2);
+document.getElementById('upBtn').onclick = () => bumpY(0.2);
+document.getElementById('wlDn').onclick = () => bumpWaterY(-0.12);
+document.getElementById('wlUp').onclick = () => bumpWaterY(0.12);
+document.getElementById('wsM').onclick = () => bumpWaterS(0.92);
+document.getElementById('wsP').onclick = () => bumpWaterS(1.08);
 function rotateAction() {
   if (moveMode && selObj) { const tg = selObj.pid ? [...objects.values()].filter(o => o.pid === selObj.pid) : [selObj]; for (const o of tg) { o.rot = (o.rot + 1) % 4; o.mesh.rotation.y = o.rot * Math.PI / 2; } scheduleSave(); return; }   // tourne l'objet (ou les 2 lampadaires de la paire ensemble)
   curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°';
@@ -499,7 +523,7 @@ function scheduleSave() { if (window.__noSave) return; clearTimeout(saveT); save
 function serialize() {
   const tiles = [], objs = [];
   for (const [k, e] of grid) { const [gx, gz] = k.split('_').map(Number); tiles.push({ gx, gz, type: e.type, rot: e.rot }); }
-  for (const e of objects.values()) objs.push({ gx: e.gx, gz: e.gz, ox: e.ox, oz: e.oz, type: e.type, rot: e.rot, sc: e.sc, pid: e.pid, axis: e.axis, side: e.side });
+  for (const e of objects.values()) objs.push({ gx: e.gx, gz: e.gz, ox: e.ox, oz: e.oz, type: e.type, rot: e.rot, sc: e.sc, dy: e.dy, waterDy: e.waterDy, waterScale: e.waterScale, pid: e.pid, axis: e.axis, side: e.side });
   const halfs = []; for (const e of halfTiles.values()) halfs.push({ x: e.x, z: e.z, type: e.type, rot: e.rot });
   return { tiles, objects: objs, halfs, objScale, objOff, train: curTrain };
 }
