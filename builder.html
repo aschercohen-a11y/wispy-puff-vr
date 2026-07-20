@@ -318,8 +318,7 @@ function snap(v) { return Math.round(v / 0.5) * 0.5; }   // grille fine 0.5 pour
 function removeObjectById(id) { const e = objects.get(id); if (e) { worldGroup.remove(e.mesh); objects.delete(id); } }
 function removeObjectsInCell(gx, gz) { for (const [id, e] of [...objects]) if (e.gx === gx && e.gz === gz) removeObjectById(id); }
 function placeObject(gx, gz, type, rot) {
-  if (PAIRED[type]) {   // PAIRE (lampadaire) : nettoie la case puis pose les 2 en vis-à-vis
-    removeObjectsInCell(gx, gz);
+  if (PAIRED[type]) {   // PAIRE (lampadaire) : pose les 2 en vis-à-vis SANS effacer les paires déjà présentes
     const off = offFor(type), pid = ++pairSeq;
     if (rot % 2 === 0) { addObject(type, gx, gz, 0, off, rot, { pid, axis: 'x', side: 1 }); addObject(type, gx, gz, 0, -off, rot + 2, { pid, axis: 'x', side: -1 }); }
     else { addObject(type, gx, gz, off, 0, rot, { pid, axis: 'z', side: 1 }); addObject(type, gx, gz, -off, 0, rot + 2, { pid, axis: 'z', side: -1 }); }
