@@ -36,6 +36,10 @@
   <h3>🧱 Constructeur LEGO</h3>
   <small>Choisis une rubrique, clique un élément, puis clique sur la grille. Ça s'aimante tout seul.</small>
   <div id="pal"></div>
+  <div class="grp">
+    <div class="lbl">🚂 Type de train (pose des rails d'abord)</div>
+    <select id="trainSel" style="width:100%;box-sizing:border-box;padding:7px;border-radius:6px;background:#123;color:#dff;border:1px solid #6fd;font-size:13px"></select>
+  </div>
   <div class="grp" id="sizeCtl" style="display:none">
     <div class="lbl">Taille de l'accessoire</div>
     <div class="row2"><button id="szM" class="act" style="flex:1">➖</button><button id="szV" class="act" style="flex:1.4;background:#123">100%</button><button id="szP" class="act" style="flex:1">➕</button></div>
@@ -50,10 +54,6 @@
     <button id="move" class="act">✋ Déplacer un objet</button>
     <div class="row2"><button id="erase" class="act" style="flex:1">🧹 Gomme</button><button id="clear" class="warn" style="flex:1">🗑️ Vider</button></div>
     <button id="view" class="act">🗺️ Vue 2D (plan)</button>
-  </div>
-  <div class="grp">
-    <div class="lbl">🚂 Type de train</div>
-    <select id="trainSel" style="width:100%;box-sizing:border-box;padding:7px;border-radius:6px;background:#123;color:#dff;border:1px solid #6fd;font-size:13px"></select>
   </div>
   <div class="grp">
     <button id="save" class="act">💾 Sauvegarder</button>
