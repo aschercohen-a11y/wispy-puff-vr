@@ -253,7 +253,7 @@ const LAKE_RIPPLE = (function () { const c = document.createElement('canvas'); c
 function addLakeWater(grp) {
   grp.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(grp);
   const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
-  const R = Math.min(bb.max.x - bb.min.x, bb.max.z - bb.min.z) * 0.33, wy = bb.min.y + (bb.max.y - bb.min.y) * 0.52;   // rayon dans la cuvette ; niveau un peu sous le bord
+  const R = Math.min(bb.max.x - bb.min.x, bb.max.z - bb.min.z) * 0.43, wy = bb.min.y + (bb.max.y - bb.min.y) * 0.58;   // rayon large (remplit jusqu'aux berges) ; niveau plus haut
   const water = new THREE.Mesh(new THREE.CircleGeometry(R, 44), new THREE.MeshBasicMaterial({ color: 0x2f8fd0, transparent: true, opacity: 0.82, side: THREE.DoubleSide })); water.rotation.x = -Math.PI / 2; water.position.set(cx, wy, cz);
   const rip = new THREE.Mesh(new THREE.CircleGeometry(R * 0.98, 44), new THREE.MeshBasicMaterial({ map: LAKE_RIPPLE, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide })); rip.rotation.x = -Math.PI / 2; rip.position.set(cx, wy + 0.02, cz);
   grp.add(water); grp.add(rip);
@@ -273,7 +273,7 @@ function buildAllee() {   // petit chemin pavé + 2 piliers + haies (mène de la
 const DECO = { allee: { label: '🚪 Allée / entrée' } };
 OBJ_ASSET.allee = buildAllee();
 const gltf = new GLTFLoader();
-for (const src of [HOUSES, BUILDINGS]) for (const k in src) { const h = src[k]; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); OBJ_ASSET[k] = fitObject(g.scene, h.foot || 9); if (k === 'lac') addLakeWater(OBJ_ASSET[k]); const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) { btn.disabled = false; btn.textContent = h.label; } placeReady(); }); }
+for (const src of [HOUSES, BUILDINGS]) for (const k in src) { const h = src[k]; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); OBJ_ASSET[k] = fitObject(g.scene, h.foot || 9); if (k === 'lac') { const root = OBJ_ASSET[k].children[0]; root.scale.y *= 0.65; root.position.y = 0; root.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(root); root.position.y = -bb.min.y; addLakeWater(OBJ_ASSET[k]); } const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) { btn.disabled = false; btn.textContent = h.label; } placeReady(); }); }
 // Rail Meshy (modèle) : tuile async, 3 segments par case pour tuiler sur 14
 gltf.load('models/rail_meshy.glb', (g) => {
   unlit(g.scene); const source = g.scene; source.updateMatrixWorld(true);
