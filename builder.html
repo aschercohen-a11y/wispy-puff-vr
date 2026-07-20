@@ -595,12 +595,12 @@ new GLTFLoader().load('models/barrier_train.glb', (g) => {
   BARRIER_ARM = new THREE.Group(); BARRIER_ARM.add(root); scheduleTrains();
 });
 function makeBarrier(px, pz, roadAlong, dir) {
-  const g = new THREE.Group(), H = 1.5, SIDE = 5, AHEAD = 4.5;   // poteau au bord de la route (SIDE) ; décalé avant/après les rails (AHEAD)
+  const g = new THREE.Group(), H = 1.5, SIDE = 5, AHEAD = 2.6;   // poteau au bord de la route (SIDE) ; décalé juste avant/après les rails (AHEAD)
   let postX, postZ, aimY;
   if (roadAlong === 'z') {   // route le long de Z, rails le long de X → bras EN TRAVERS de la route (le long de X), décalé en Z hors des rails
     postX = px + SIDE * dir; postZ = pz - AHEAD * dir; aimY = dir > 0 ? Math.PI : 0;
   } else {                    // route le long de X, rails le long de Z → bras le long de Z, décalé en X hors des rails
-    postX = px - AHEAD * dir; postZ = pz + SIDE * dir; aimY = dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+    postX = px - AHEAD * dir; postZ = pz + SIDE * dir; aimY = dir > 0 ? Math.PI / 2 : -Math.PI / 2;   // bras vers le CENTRE de la route
   }
   const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.16, H, 8), new THREE.MeshBasicMaterial({ color: 0xdadada })); post.position.set(postX, H / 2, postZ); g.add(post);
   const pivot = new THREE.Group(); pivot.position.set(postX, H, postZ); pivot.rotation.y = aimY;
