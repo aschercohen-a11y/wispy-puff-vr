@@ -595,14 +595,17 @@ new GLTFLoader().load('models/barrier_train.glb', (g) => {
   BARRIER_ARM = new THREE.Group(); BARRIER_ARM.add(root); scheduleTrains();
 });
 function makeBarrier(px, pz, roadAlong, dir) {
-  const g = new THREE.Group(), H = 1.5, OFF = 5.5;
-  let postX = px, postZ = pz, aimY = 0;
-  if (roadAlong === 'z') { postX = px + OFF * dir; aimY = dir > 0 ? Math.PI : 0; }        // route en Z : poteaux à x=±5.5, bras vers le centre
-  else { postZ = pz + OFF * dir; aimY = dir > 0 ? -Math.PI / 2 : Math.PI / 2; }            // route en X : poteaux à z=±5.5
+  const g = new THREE.Group(), H = 1.5, SIDE = 5, AHEAD = 4.5;   // poteau au bord de la route (SIDE) ; décalé avant/après les rails (AHEAD)
+  let postX, postZ, aimY;
+  if (roadAlong === 'z') {   // route le long de Z, rails le long de X → bras EN TRAVERS de la route (le long de X), décalé en Z hors des rails
+    postX = px + SIDE * dir; postZ = pz - AHEAD * dir; aimY = dir > 0 ? Math.PI : 0;
+  } else {                    // route le long de X, rails le long de Z → bras le long de Z, décalé en X hors des rails
+    postX = px - AHEAD * dir; postZ = pz + SIDE * dir; aimY = dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+  }
   const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.16, H, 8), new THREE.MeshBasicMaterial({ color: 0xdadada })); post.position.set(postX, H / 2, postZ); g.add(post);
   const pivot = new THREE.Group(); pivot.position.set(postX, H, postZ); pivot.rotation.y = aimY;
   const lift = new THREE.Group(); pivot.add(lift); lift.add(BARRIER_ARM.clone(true)); g.add(pivot);
-  return { group: g, lift, angle: 1.45, target: 1.45, px, pz };   // 1.45 = levé (vertical) ; 0 = baissé (horizontal)
+  return { group: g, lift, angle: 1.45, target: 1.45, px, pz };   // 1.45 = levé (vertical) ; 0 = baissé (horizontal en travers de la route)
 }
 function rebuildBarriers() {
   for (const bar of barriers) scene.remove(bar.group); barriers = [];
@@ -651,7 +654,8 @@ addEventListener('keyup', (e) => { pk[e.key.toLowerCase()] = false; });
 // hook de test (inoffensif)
 window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); }, togglePlay,
   placeHalfXZ: (x, z, type, rot) => { const sx = Math.round(x / HG) * HG, sz = Math.round(z / HG) * HG, k = sx + '_' + sz; const m = ASSET[type].clone(true); m.position.set(sx, 0, sz); m.rotation.y = (rot || 0) * Math.PI / 2; worldGroup.add(m); halfTiles.set(k, { type, x: sx, z: sz, rot: rot || 0, mesh: m }); },
-  barrierInfo: () => ({ armLoaded: !!BARRIER_ARM, count: barriers.length, sample: barriers[0] ? { px: barriers[0].px, pz: barriers[0].pz, angle: +barriers[0].angle.toFixed(2), gpos: barriers[0].group.position.toArray().map(v => +v.toFixed(1)) } : null }) };
+  barrierInfo: () => ({ armLoaded: !!BARRIER_ARM, count: barriers.length, sample: barriers[0] ? { px: barriers[0].px, pz: barriers[0].pz, angle: +barriers[0].angle.toFixed(2), gpos: barriers[0].group.position.toArray().map(v => +v.toFixed(1)) } : null }),
+  clearSilent: () => { clearAllSilent(); scheduleTrains(); refresh(); } };
 
 // ---------- Boucle ----------
 let _lt = 0;
