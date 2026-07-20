@@ -54,6 +54,7 @@
     <button id="move" class="act">✋ Déplacer un objet</button>
     <div class="row2"><button id="erase" class="act" style="flex:1">🧹 Gomme</button><button id="clear" class="warn" style="flex:1">🗑️ Vider</button></div>
     <button id="view" class="act">🗺️ Vue 2D (plan)</button>
+    <button id="fit" class="act">🔭 Voir tout</button>
   </div>
   <div class="grp">
     <button id="save" class="act">💾 Sauvegarder</button>
@@ -441,6 +442,14 @@ document.getElementById('view').onclick = () => {
   const to2d = (cam === cam3);
   cam = to2d ? cam2 : cam3; ctr = to2d ? ctr2 : ctr3; ctr3.enabled = !to2d; ctr2.enabled = to2d;
   document.getElementById('view').textContent = to2d ? '🎥 Vue 3D' : '🗺️ Vue 2D (plan)';
+};
+document.getElementById('fit').onclick = () => {   // recadre la caméra sur TOUTE la carte
+  const box = new THREE.Box3(); let any = false;
+  for (const m of [grid, objects, halfTiles]) for (const e of m.values()) { box.expandByObject(e.mesh); any = true; }
+  if (!any) return;
+  const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3()), r = Math.max(sz.x, sz.z, 20);
+  if (cam === cam3) { cam3.position.set(c.x, r * 0.85 + 15, c.z + r * 0.85 + 15); cam3.lookAt(c.x, 0, c.z); ctr3.target.set(c.x, 0, c.z); ctr3.update(); }
+  else { cam2.position.set(c.x, 200, c.z); cam2.zoom = Math.min(cam2.right * 2 / (sz.x + 20), (cam2.top * 2) / (sz.z + 20)); cam2.updateProjectionMatrix(); ctr2.target.set(c.x, 0, c.z); ctr2.update(); }
 };
 document.getElementById('save').onclick = () => saveNow(true);
 function refresh() { document.getElementById('count').textContent = grid.size + objects.size + halfTiles.size; }
