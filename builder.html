@@ -432,11 +432,20 @@ load();
 
 // ---------- TRAINS (Kenney) qui roulent sur les tuiles Rail horizontales ----------
 const TRAIN_SCALE = 1.5, TRAIN_Y = 0.12;
-const TRAIN_FILES = { loco: 'train-loco', wag1: 'train-wag1', wag2: 'train-wag2', wag3: 'train-wag3', wag4: 'train-wag4', diesel: 'train-diesel', tram: 'train-tram', bulletA: 'train-bulletA', bulletB: 'train-bulletB', bulletC: 'train-bulletC' };
+const TRAIN_FILES = {
+  loco: 'train-loco', wag1: 'train-wag1', wag2: 'train-wag2', wag3: 'train-wag3', wag4: 'train-wag4',
+  diesel: 'train-diesel', tram: 'train-tram', bulletA: 'train-bulletA', bulletB: 'train-bulletB', bulletC: 'train-bulletC',
+  subwayA: 'train-subwayA', subwayB: 'train-subwayB', subwayC: 'train-subwayC',
+  cityA: 'train-cityA', cityB: 'train-cityB', cityC: 'train-cityC',
+  doubleA: 'train-doubleA', doubleB: 'train-doubleB', doubleC: 'train-doubleC',
+};
 const TRAIN_PRESETS = {
   vapeur: { label: '🚂 Vapeur', cars: ['loco', 'wag1', 'wag2', 'wag3', 'wag4'] },
   diesel: { label: '🚆 Diesel', cars: ['diesel', 'wag2', 'wag3', 'wag1', 'wag4'] },
   tgv:    { label: '🚄 TGV',    cars: ['bulletA', 'bulletB', 'bulletB', 'bulletC'] },
+  subway: { label: '🚇 Métro',  cars: ['subwayA', 'subwayB', 'subwayB', 'subwayC'] },
+  city:   { label: '🚈 City',   cars: ['cityA', 'cityB', 'cityB', 'cityC'] },
+  double: { label: '🚊 Double', cars: ['doubleA', 'doubleB', 'doubleB', 'doubleC'] },
   tram:   { label: '🚋 Tram',   cars: ['tram', 'tram'] },
 };
 let curTrain = 'vapeur';
