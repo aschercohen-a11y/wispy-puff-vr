@@ -193,6 +193,7 @@ function buildTe() {   // embranchement en T : route horizontale complète + un 
 const TILES = {
   route:     { label: '🛣️ Route droite', build: buildRoute },
   rail:      { label: '🚂 Rail droit',   build: buildRail },
+  rail_meshy:{ label: '🛤️ Rail Meshy',   build: () => new THREE.Group(), async: true },
   passage:   { label: '🚦 Passage à niveau', build: buildPassage },
   carrefour: { label: '➕ Carrefour',     build: buildCarrefour },
   prairie:   { label: '🌳 Prairie',       build: buildPrairie },
@@ -238,6 +239,15 @@ const DECO = { allee: { label: '🚪 Allée / entrée' } };
 OBJ_ASSET.allee = buildAllee();
 const gltf = new GLTFLoader();
 for (const src of [HOUSES, BUILDINGS]) for (const k in src) { const h = src[k]; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); OBJ_ASSET[k] = fitObject(g.scene, h.foot || 9); const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) btn.disabled = false; placeReady(); }); }
+// Rail Meshy (modèle) : tuile async, 3 segments par case pour tuiler sur 14
+gltf.load('models/rail_meshy.glb', (g) => {
+  unlit(g.scene); const source = g.scene; source.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(source), modLen = (b.max.x - b.min.x) || 1, N = 3, seg = T / N, s = seg / modLen;
+  const grp = new THREE.Group(); grp.add(freshGrass());   // base herbe (sinon ça flotte)
+  for (let i = 0; i < N; i++) { const c = source.clone(true); c.scale.setScalar(s); c.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(c); c.position.set((-T / 2 + seg / 2 + i * seg) - (bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2); grp.add(c); }
+  ASSET.rail_meshy = grp;
+  const btn = document.querySelector('button[data-t="rail_meshy"]'); if (btn) btn.disabled = false;
+});
 function kindOf(t) { return TILES[t] ? 'tile' : ((HOUSES[t] || BUILDINGS[t] || DECO[t]) ? 'object' : null); }
 function assetOf(t) { return TILES[t] ? ASSET[t] : OBJ_ASSET[t]; }
 
@@ -259,9 +269,9 @@ function placeTile(gx, gz, type, rot) {
   const mesh = ASSET[type].clone(true);
   mesh.position.set(gx * T, 0, gz * T); mesh.rotation.y = rot * Math.PI / 2;
   worldGroup.add(mesh); grid.set(key(gx, gz), { type, rot, mesh });
-  if (type === 'rail' || type === 'passage') scheduleTrains();
+  if (type === 'rail' || type === 'passage' || type === 'rail_meshy') scheduleTrains();
 }
-function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { const wasRail = e.type === 'rail' || e.type === 'passage'; worldGroup.remove(e.mesh); grid.delete(key(gx, gz)); if (wasRail) scheduleTrains(); } }
+function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { const wasRail = e.type === 'rail' || e.type === 'passage' || e.type === 'rail_meshy'; worldGroup.remove(e.mesh); grid.delete(key(gx, gz)); if (wasRail) scheduleTrains(); } }
 let objId = 0, pairSeq = 0;
 function addObject(type, gx, gz, ox, oz, rot, meta) {   // pose 1 objet précis (id unique → suppressible seul)
   const a = OBJ_ASSET[type]; if (!a) return;
@@ -367,7 +377,7 @@ for (const cat of CATS) {
   const wrap = document.createElement('div'); wrap.className = 'cat' + (cat.open ? ' open' : '');
   const head = document.createElement('div'); head.className = 'head'; head.innerHTML = '<span>' + cat.name + '</span><span class="arw">▸</span>'; head.onclick = () => wrap.classList.toggle('open');
   const body = document.createElement('div'); body.className = 'body';
-  for (const k in cat.items) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = cat.items[k].label; b.dataset.t = k; if ((cat.items === HOUSES || cat.items === BUILDINGS) && !OBJ_ASSET[k]) b.disabled = true; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; body.appendChild(b); }
+  for (const k in cat.items) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = cat.items[k].label; b.dataset.t = k; if ((cat.items === HOUSES || cat.items === BUILDINGS) && !OBJ_ASSET[k]) b.disabled = true; if (cat.items === TILES && TILES[k].async) b.disabled = true; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; body.appendChild(b); }
   wrap.appendChild(head); wrap.appendChild(body); pal.appendChild(wrap);
 }
 function highlight() { for (const b of pal.querySelectorAll('button.tile')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; updateSizeCtl(); updateModeBtns(); }
@@ -478,7 +488,7 @@ function spawnTrain(axis, coords, fixed) {   // axis 'x' = voie horizontale, 'z'
 function rebuildTrains() {
   clearTrains(); if (!TRAIN_ASSET.loco) return;
   const H = {}, V = {};   // rails/passages : rangées horizontales (rot pair) par gz, colonnes verticales (rot impair) par gx
-  for (const [k, e] of grid) if (e.type === 'rail' || e.type === 'passage') { const [gx, gz] = k.split('_').map(Number); if (e.rot % 2 === 0) (H[gz] = H[gz] || []).push(gx); else (V[gx] = V[gx] || []).push(gz); }
+  for (const [k, e] of grid) if (e.type === 'rail' || e.type === 'passage' || e.type === 'rail_meshy') { const [gx, gz] = k.split('_').map(Number); if (e.rot % 2 === 0) (H[gz] = H[gz] || []).push(gx); else (V[gx] = V[gx] || []).push(gz); }
   for (const gz in H) spawnTrain('x', H[gz], Number(gz));
   for (const gx in V) spawnTrain('z', V[gx], Number(gx));
 }
