@@ -266,7 +266,8 @@ gltf.load('models/rail_meshy.glb', (g) => {
   unlit(g.scene); const source = g.scene; source.updateMatrixWorld(true);
   const b = new THREE.Box3().setFromObject(source), modLen = (b.max.x - b.min.x) || 1, N = 3, seg = T / N, s = seg / modLen;
   const grp = new THREE.Group(); grp.add(freshGrass());   // base herbe (sinon ça flotte)
-  for (let i = 0; i < N; i++) { const c = source.clone(true); c.scale.setScalar(s); c.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(c); c.position.set((-T / 2 + seg / 2 + i * seg) - (bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2); grp.add(c); }
+  const SINK = 0.3;   // enfonce le ballast dans le sol (rail Meshy paraissait trop haut)
+  for (let i = 0; i < N; i++) { const c = source.clone(true); c.scale.setScalar(s); c.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(c); c.position.set((-T / 2 + seg / 2 + i * seg) - (bb.min.x + bb.max.x) / 2, -bb.min.y - SINK, -(bb.min.z + bb.max.z) / 2); grp.add(c); }
   ASSET.rail_meshy = grp;
   const btn = document.querySelector('button[data-t="rail_meshy"]'); if (btn) btn.disabled = false;
 });
