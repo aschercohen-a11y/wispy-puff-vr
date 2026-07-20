@@ -305,3 +305,72 @@ Oculus/
 
 ### 📦 Modèles ajoutés cette session
 `fountain.glb` · `coin.glb` · `kid.glb` · `woman.glb` · `stroller.glb` · `bus.glb` · `audio/musique.mp3`. Sources brutes hors repo. Déploiement Coolify (app `pj5udv9xweahucsyyktq509d`) sur `wispyvr.swipego.app`.
+
+---
+
+# 🧱 SESSION 2026-07-19/20 — Constructeur LEGO (builder.html)
+
+## 🔄 Le grand pivot
+Abandon de « grande carte + objets placés un par un » (bugs d'alignement/couleur à répétition sur trottoirs/routes/carrefour) → **constructeur modulaire à tuiles LEGO** dans un fichier neuf : `builder.html` (racine → `wispyvr.swipego.app/builder.html`). L'ancien `index.html`/`surf.html` restent comme référence.
+
+- Chaque tuile = carré **14×14** : coupe `route 6 + 2×trottoir 4 = 14` (trottoirs jusqu'au bord → aucune languette d'herbe entre tuiles).
+- Tout en **unlit** (MeshBasicMaterial) → couleurs identiques par construction. Trottoirs = `TILE_TEX` (quadrillage 4×4, `#c3bcaa`).
+- Grille aimantée (gx,gz entiers, world = gx*14), rotation **R** (90°), bascule vue **2D plan / 3D orbite**, bouton **🔭 Voir tout**.
+- Sauvegarde Supabase **`wispy_layout` id=2** (id=1 = ancien village, backup `backup_village_20260719.json`).
+
+## 🧩 Tuiles (rubrique Routes)
+Route droite · Rail droit (procédural) · Rail Meshy (modèle user, 3 segments/case) · Passage à niveau · Carrefour · Prairie · **Demi-route (7)** + **Demi-prairie (7×7)** (grille fine 7 pour combler les trous). Auto-passage : poser une route sur un rail crée automatiquement le passage à niveau.
+
+## 🏢 Objets (rubriques Maisons / Immeubles & lieux / Déco)
+Maisons GLB (maison1/2, boulangerie, chaumière, carotte, moulin, **arbre, palmier**, lampadaire) · Immeubles (épicerie, fleuriste, café, station service, parc, **résidence luxe, pharmacie, immeuble orange, brasserie, bibliothèque**) · **Lac (eau animée codée)** · Allée (déco procédurale).
+
+## 🚂 Trains (Kenney Train Kit + tram Meshy user)
+Roulent automatiquement sur les tuiles rail (horizontales ET verticales), bouclent, se tournent seuls. Sélecteur **Type de train** : Vapeur, Diesel, TGV, Métro, City, Double, Tram, **Tram Meshy (user)**. `prepCar` : auto-orientation + normalisation largeur = écartement rails (TARGET_W).
+
+## 🚧 Barrières de passage à niveau (bras Meshy user + poteau codé)
+2 barrières/passage, EN TRAVERS de la route (près des rails), se **baissent** quand un train approche (22 unités) et se **relèvent** après. Bras vers le centre de la route.
+
+## 🎮 Mode Jeu
+Bouton **🎮 Jouer dans mon monde** → le perso (character.glb) apparaît, déplacement ZQSD/WASD/flèches, caméra 3e personne + rotation souris, bouton Retour éditeur.
+
+## 🛠️ Réglages par objet (mode ✋ Déplacer → clic sur objet)
+- **Taille** ➖/➕ (par instance ; lampadaires = les 2 de la paire ensemble)
+- **Rotation** R (paire ensemble)
+- **Hauteur** ⬇️/⬆️ (enfoncer/relever, ex : lac à ras l'herbe)
+- **Lac** : niveau d'eau ⬇️/⬆️ + taille d'eau ➖/➕
+- **Écart** (paires) ⟵ route / bord ⟶
+Tout sauvegardé (sc, dy, rot, waterDy, waterScale, ox/oz, pid/axis/side).
+
+## ⚙️ Pipeline d'optimisation Meshy (rappel)
+`simplify --ratio 0.04 --error 0.008` puis `optimize --compress quantize --texture-compress webp --texture-size 1024`. Textures externes (colormap Kenney, rails/trains) → **embarquées en webp**. Le builder passe tout en unlit au chargement.
+⚠️ **Résidence luxe = 255 000 triangles** (pièces séparées, plancher du simplifieur) → 9,6 MB. Les textures ne sont PAS le poids (120 Ko), c'est la géométrie.
+
+## ⚠️ Incidents / leçons
+- **2× écrasé la carte user (id=2) via des tests headless avec de vrais clics souris** (déclenchent scheduleSave). Récupération via snapshot `lay3.json` + bouton **↩️ Restaurer sauvegarde locale**. RÈGLE : tester UNIQUEMENT via `window.__builder.*` + flag `window.__noSave`, jamais de `p.mouse.*` sur le canvas.
+- Bug « obligé de rafraîchir pour poser un autre immeuble » → état `dragged` coincé → fix : `try/finally` qui réinitialise toujours downXY/dragged/grabbed au pointerup.
+- Bug « paires de lampadaires s'effacent » et « immeubles se remplacent » → retiré `removeObjectsInCell` (objets s'ajoutent).
+
+---
+
+# 💡 PROPOSITIONS À DISCUTER DEMAIN (perf Quest)
+
+**Contexte** : un immeuble détaillé = 100k-255k triangles. Sans optimisation, TOUT ce qui est posé est affiché en permanence → au-delà de ~10-15 gros immeubles, le Quest rame. Un jeu natif de 20 GB tient parce qu'il n'affiche qu'une petite partie à la fois (techniques ci-dessous) ; nous, jeu WEB, on télécharge tout et on affiche tout.
+
+### 1. Distance culling (⭐ recommandé en premier — simple, bon rendement)
+Ne pas afficher / remplacer par une version légère ce qui est **loin** de la caméra. Comme le brouillard qui cache le lointain. Facile à coder.
+
+### 2. LOD (Level of Detail)
+De loin, un immeuble à 255k tris → remplacé auto par une version 500 tris. On ne voit le détail que de près. Boulot moyen. Permettrait de garder des modèles ultra-détaillés (comme la résidence luxe).
+
+### 3. Frustum culling — **déjà actif** (three.js), gratuit
+Ce qui est derrière/hors écran n'est pas dessiné.
+
+### 4. Occlusion culling (le plus puissant, le plus dur)
+Ne pas dessiner ce qui est **caché derrière** un autre objet (immeuble derrière un immeuble). Coupe 70-80 % dans une ville dense, mais calcul temps réel lourd, délicat sur Web/Quest. À garder pour plus tard.
+
+### Autres pistes
+- **Instancing** : si on pose 50 fois le même lampadaire/arbre → un seul « draw call » au lieu de 50 (énorme gain, moyen à coder).
+- **Meshy en "medium"** au lieu de "high" → modèles ~100k tris au lieu de millions (le plus simple : côté génération).
+- **DRACO/meshopt** : compresse le FICHIER (téléchargement) mais PAS le coût d'affichage (triangles) → utile pour le download, pas pour le framerate.
+
+**Ordre conseillé** : (a) modèles légers "medium" à la génération → (b) distance culling → (c) instancing → (d) LOD → (e) occlusion si vraiment nécessaire.
