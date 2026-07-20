@@ -59,6 +59,7 @@
   </div>
   <div class="grp">
     <button id="save" class="act">💾 Sauvegarder</button>
+    <button id="restore" class="act" style="background:#e0a53f;color:#023">↩️ Restaurer sauvegarde locale</button>
   </div>
 </div>
 <div id="hud">Posés : <b id="count">0</b> · clic gauche = poser · clic droit = effacer · molette = zoom · R = tourner</div>
@@ -317,12 +318,12 @@ function snap(v) { return Math.round(v / 0.5) * 0.5; }   // grille fine 0.5 pour
 function removeObjectById(id) { const e = objects.get(id); if (e) { worldGroup.remove(e.mesh); objects.delete(id); } }
 function removeObjectsInCell(gx, gz) { for (const [id, e] of [...objects]) if (e.gx === gx && e.gz === gz) removeObjectById(id); }
 function placeObject(gx, gz, type, rot) {
-  removeObjectsInCell(gx, gz);
-  if (PAIRED[type]) {   // objet = PAIRE, un de chaque côté de la route (selon la rotation), qui se font face
+  if (PAIRED[type]) {   // PAIRE (lampadaire) : nettoie la case puis pose les 2 en vis-à-vis
+    removeObjectsInCell(gx, gz);
     const off = offFor(type), pid = ++pairSeq;
     if (rot % 2 === 0) { addObject(type, gx, gz, 0, off, rot, { pid, axis: 'x', side: 1 }); addObject(type, gx, gz, 0, -off, rot + 2, { pid, axis: 'x', side: -1 }); }
     else { addObject(type, gx, gz, off, 0, rot, { pid, axis: 'z', side: 1 }); addObject(type, gx, gz, -off, 0, rot + 2, { pid, axis: 'z', side: -1 }); }
-  } else addObject(type, gx, gz, 0, 0, rot);
+  } else addObject(type, gx, gz, 0, 0, rot);   // bâtiment/maison/déco : s'AJOUTE (n'efface plus ce qui est déjà dans la case)
 }
 function pickObject(e) {   // id de l'objet sous le curseur (pour supprimer celui-là précisément)
   const r = renderer.domElement.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, cam);
@@ -477,7 +478,7 @@ document.getElementById('save').onclick = () => saveNow(true);
 function refresh() { document.getElementById('count').textContent = grid.size + objects.size + halfTiles.size; }
 highlight(); refresh();
 
-function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.opacity = 1; setTimeout(() => t.style.opacity = 0, 1600); }
+function toast(msg, dur) { const t = document.getElementById('toast'); t.textContent = msg; t.style.opacity = 1; setTimeout(() => t.style.opacity = 0, dur || 1600); }
 
 // ---------- Sauvegarde / chargement (Supabase, id=2) ----------
 let saveT = null;
@@ -497,17 +498,30 @@ async function saveNow(manual) {
   } catch (err) { if (manual) toast('⚠️ Hors ligne'); }
   try { localStorage.setItem('wispy_tiles', JSON.stringify(data)); } catch (e) {}
 }
+function applyData(data) {
+  if (!data) return;
+  if (data.objScale) Object.assign(objScale, data.objScale);
+  if (data.objOff) Object.assign(objOff, data.objOff);
+  if (data.train && TRAIN_PRESETS[data.train]) { curTrain = data.train; const ts = document.getElementById('trainSel'); if (ts) ts.value = curTrain; }
+  if (data.tiles) for (const t of data.tiles) if (ASSET[t.type]) placeTile(t.gx, t.gz, t.type, t.rot || 0);
+  if (data.objects) { pendingObjects = data.objects.slice(); for (const o of pendingObjects) if (o.pid) pairSeq = Math.max(pairSeq, o.pid); placeReady(); }
+  if (data.halfs) for (const h of data.halfs) if (ASSET[h.type]) { const mesh = ASSET[h.type].clone(true); mesh.position.set(h.x, 0, h.z); mesh.rotation.y = (h.rot || 0) * Math.PI / 2; worldGroup.add(mesh); halfTiles.set(h.x + '_' + h.z, { type: h.type, x: h.x, z: h.z, rot: h.rot || 0, mesh }); }
+  refresh();
+}
+function clearAllSilent() { for (const e of grid.values()) worldGroup.remove(e.mesh); for (const e of objects.values()) worldGroup.remove(e.mesh); for (const e of halfTiles.values()) worldGroup.remove(e.mesh); grid.clear(); objects.clear(); halfTiles.clear(); pendingObjects = []; }
+function restoreLocal() {   // recharge la sauvegarde locale du navigateur (secours si le cloud a été corrompu)
+  let d = null; try { d = JSON.parse(localStorage.getItem('wispy_tiles') || 'null'); } catch (e) {}
+  if (!d || ((!d.tiles || !d.tiles.length) && (!d.objects || !d.objects.length))) { toast('⚠️ Aucune sauvegarde locale trouvée'); return; }
+  if (!confirm('Restaurer ta sauvegarde locale ? Elle remplace la carte affichée.')) return;
+  clearAllSilent(); applyData(d); scheduleTrains(); saveNow(true); toast('✅ Sauvegarde locale restaurée');
+}
+document.getElementById('restore').onclick = restoreLocal;
 async function load() {
   let data = null;
   try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.' + LAYOUT_ID + '&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); data = j && j[0] && j[0].data; } } catch (e) {}
-  if (!data) { try { data = JSON.parse(localStorage.getItem('wispy_tiles') || 'null'); } catch (e) {} }
-  if (data && data.objScale) Object.assign(objScale, data.objScale);   // tailles réglées, appliquées dès la pose
-  if (data && data.objOff) Object.assign(objOff, data.objOff);         // écarts réglés
-  if (data && data.train && TRAIN_PRESETS[data.train]) { curTrain = data.train; const ts = document.getElementById('trainSel'); if (ts) ts.value = curTrain; }   // type de train sauvegardé
-  if (data && data.tiles) for (const t of data.tiles) if (ASSET[t.type]) placeTile(t.gx, t.gz, t.type, t.rot || 0);
-  if (data && data.objects) { pendingObjects = data.objects.slice(); for (const o of pendingObjects) if (o.pid) pairSeq = Math.max(pairSeq, o.pid); placeReady(); }   // les maisons se posent au fur et à mesure du chargement des modèles (pairSeq > pids chargés pour éviter les collisions)
-  if (data && data.halfs) for (const h of data.halfs) if (ASSET[h.type]) { const mesh = ASSET[h.type].clone(true); mesh.position.set(h.x, 0, h.z); mesh.rotation.y = (h.rot || 0) * Math.PI / 2; worldGroup.add(mesh); halfTiles.set(h.x + '_' + h.z, { type: h.type, x: h.x, z: h.z, rot: h.rot || 0, mesh }); }   // demi-blocs
-  refresh();
+  let local = null; try { local = JSON.parse(localStorage.getItem('wispy_tiles') || 'null'); } catch (e) {}
+  applyData(data || local);
+  if (local && local.tiles && local.tiles.length) toast('💾 Sauvegarde locale dispo — bouton ↩️ Restaurer si ta carte semble incomplète', 5000);
 }
 load();
 
