@@ -159,7 +159,7 @@ function buildPassage() {   // PASSAGE À NIVEAU : rails le long de X qui traver
   const g = new THREE.Group();
   g.add(plane(ROAD_W, T, ASPH, 0.02));                                    // chaussée perpendiculaire (le long de Z)
   for (const sgn of [-1, 1]) g.add(sidewalk(SIDE_W, T, sgn * SIDE_Z, 0)); // trottoirs de la route
-  for (const zc of [-1, 1]) for (let z = -HALF + 1.25; z < HALF; z += 2.5) g.add(plane(0.16, 1.2, LINE, 0.023, zc, z));   // pointillés de la route
+  for (const zc of [-1, 1]) for (let z = -HALF + 1.25; z < HALF; z += 2.5) { if (Math.abs(z) < 2.6) continue; g.add(plane(0.16, 1.2, LINE, 0.023, zc, z)); }   // pointillés de la route SAUF au niveau des rails (croisement dégagé)
   const woodM = new THREE.MeshBasicMaterial({ color: 0x6b4a2f });
   for (const sx of [-1, 1]) for (let x = ROAD_W / 2 + 0.7; x < HALF; x += 1.4) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.1, 3), woodM); s.position.set(sx * x, 0.05, 0); g.add(s); }   // traverses hors chaussée
   const steelM = new THREE.MeshBasicMaterial({ color: 0x8a8f96 });
