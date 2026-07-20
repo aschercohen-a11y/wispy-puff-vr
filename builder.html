@@ -254,6 +254,11 @@ const BUILDINGS = {   // grands bâtiments Meshy (optimisés : ~50k tris, ~1 MB)
   station:   { label: '⛽ Station service',    file: 'station',   foot: 14 },
   parc:      { label: '🏞️ Parc',               file: 'parc',      foot: 18 },
   lac:       { label: '🏞️ Lac (eau animée)',   file: 'lac',       foot: 13 },
+  residence: { label: '🏢 Résidence luxe',     file: 'residence', foot: 15 },
+  pharmacie: { label: '💊 Pharmacie',          file: 'pharmacie', foot: 13 },
+  immorange: { label: '🏢 Immeuble orange',    file: 'immeuble_orange', foot: 12 },
+  brasserie: { label: '☕ Brasserie café',     file: 'brasserie', foot: 13 },
+  biblio:    { label: '📚 Bibliothèque',       file: 'bibliotheque', foot: 13 },
 };
 const OBJ_ASSET = {};   // assets de la couche OBJETS : maisons GLB + immeubles + déco procédurale
 function unlit(root) { root.traverse(m => { if (!m.isMesh || !m.material) return; const conv = (s) => { if (s.map) s.map.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshBasicMaterial({ map: s.map || null, color: s.map ? 0xffffff : (s.color ? s.color.clone() : new THREE.Color(0xffffff)), side: THREE.DoubleSide, transparent: !!s.transparent, opacity: s.opacity != null ? s.opacity : 1 }); }; m.material = Array.isArray(m.material) ? m.material.map(conv) : conv(m.material); }); }
