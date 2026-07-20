@@ -243,10 +243,21 @@ const BUILDINGS = {   // grands bâtiments Meshy (optimisés : ~50k tris, ~1 MB)
   immeuble3: { label: '☕ Immeuble café',      file: 'immeuble3', foot: 13 },
   station:   { label: '⛽ Station service',    file: 'station',   foot: 14 },
   parc:      { label: '🏞️ Parc',               file: 'parc',      foot: 18 },
+  lac:       { label: '🏞️ Lac (eau animée)',   file: 'lac',       foot: 13 },
 };
 const OBJ_ASSET = {};   // assets de la couche OBJETS : maisons GLB + immeubles + déco procédurale
 function unlit(root) { root.traverse(m => { if (!m.isMesh || !m.material) return; const conv = (s) => { if (s.map) s.map.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshBasicMaterial({ map: s.map || null, color: s.map ? 0xffffff : (s.color ? s.color.clone() : new THREE.Color(0xffffff)), side: THREE.DoubleSide, transparent: !!s.transparent, opacity: s.opacity != null ? s.opacity : 1 }); }; m.material = Array.isArray(m.material) ? m.material.map(conv) : conv(m.material); }); }
 function fitObject(root, foot) { root.updateMatrixWorld(true); let b = new THREE.Box3().setFromObject(root); const w = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) || 1; root.scale.setScalar(foot / w); root.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(root); root.position.y = -b.min.y; const g = new THREE.Group(); g.add(root); return g; }
+// eau animée pour le lac : disque bleu transparent + ondulations, placés dans la cuvette
+const LAKE_RIPPLE = (function () { const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'); x.clearRect(0, 0, 128, 128); x.strokeStyle = 'rgba(255,255,255,0.5)'; for (let i = 0; i < 12; i++) { x.lineWidth = 1 + Math.random() * 1.6; x.beginPath(); x.arc(Math.random() * 128, Math.random() * 128, 6 + Math.random() * 22, 0, Math.PI * 2); x.stroke(); } const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 3); return t; })();
+function addLakeWater(grp) {
+  grp.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(grp);
+  const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+  const R = Math.min(bb.max.x - bb.min.x, bb.max.z - bb.min.z) * 0.33, wy = bb.min.y + (bb.max.y - bb.min.y) * 0.52;   // rayon dans la cuvette ; niveau un peu sous le bord
+  const water = new THREE.Mesh(new THREE.CircleGeometry(R, 44), new THREE.MeshBasicMaterial({ color: 0x2f8fd0, transparent: true, opacity: 0.82, side: THREE.DoubleSide })); water.rotation.x = -Math.PI / 2; water.position.set(cx, wy, cz);
+  const rip = new THREE.Mesh(new THREE.CircleGeometry(R * 0.98, 44), new THREE.MeshBasicMaterial({ map: LAKE_RIPPLE, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide })); rip.rotation.x = -Math.PI / 2; rip.position.set(cx, wy + 0.02, cz);
+  grp.add(water); grp.add(rip);
+}
 // ---------- Déco procédurale ----------
 function buildAllee() {   // petit chemin pavé + 2 piliers + haies (mène de la route vers la maison) ; tourne avec R
   const g = new THREE.Group();
@@ -262,7 +273,7 @@ function buildAllee() {   // petit chemin pavé + 2 piliers + haies (mène de la
 const DECO = { allee: { label: '🚪 Allée / entrée' } };
 OBJ_ASSET.allee = buildAllee();
 const gltf = new GLTFLoader();
-for (const src of [HOUSES, BUILDINGS]) for (const k in src) { const h = src[k]; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); OBJ_ASSET[k] = fitObject(g.scene, h.foot || 9); const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) { btn.disabled = false; btn.textContent = h.label; } placeReady(); }); }
+for (const src of [HOUSES, BUILDINGS]) for (const k in src) { const h = src[k]; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); OBJ_ASSET[k] = fitObject(g.scene, h.foot || 9); if (k === 'lac') addLakeWater(OBJ_ASSET[k]); const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) { btn.disabled = false; btn.textContent = h.label; } placeReady(); }); }
 // Rail Meshy (modèle) : tuile async, 3 segments par case pour tuiler sur 14
 gltf.load('models/rail_meshy.glb', (g) => {
   unlit(g.scene); const source = g.scene; source.updateMatrixWorld(true);
@@ -661,6 +672,7 @@ window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, reb
 let _lt = 0;
 renderer.setAnimationLoop((t) => {
   const dt = _lt ? Math.min(0.05, (t - _lt) / 1000) : 0.016; _lt = t;
+  LAKE_RIPPLE.offset.x += dt * 0.03; LAKE_RIPPLE.offset.y += dt * 0.022;   // ondulations de l'eau des lacs
   for (const tr of trains) { tr.p += tr.speed * dt; if (tr.p > tr.max + tr.len) tr.p = tr.min; if (tr.axis === 'x') tr.group.position.x = tr.p; else tr.group.position.z = tr.p; }   // le train roule le long de sa voie (X ou Z) et boucle
   for (const bar of barriers) {   // barrière baissée si un train approche du passage
     let near = false;
