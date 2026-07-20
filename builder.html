@@ -55,12 +55,17 @@
     <div class="row2"><button id="erase" class="act" style="flex:1">🧹 Gomme</button><button id="clear" class="warn" style="flex:1">🗑️ Vider</button></div>
     <button id="view" class="act">🗺️ Vue 2D (plan)</button>
     <button id="fit" class="act">🔭 Voir tout</button>
+    <button id="play" class="act" style="background:#3fbf5a;color:#fff;font-size:14px">🎮 Jouer dans mon monde</button>
   </div>
   <div class="grp">
     <button id="save" class="act">💾 Sauvegarder</button>
   </div>
 </div>
 <div id="hud">Posés : <b id="count">0</b> · clic gauche = poser · clic droit = effacer · molette = zoom · R = tourner</div>
+<div id="playHud" style="display:none;position:fixed;top:10px;left:10px;z-index:60;background:rgba(12,22,42,.92);color:#dff;padding:10px 14px;border-radius:10px;font:13px sans-serif;border:2px solid #6fd">
+  🎮 <b>ZQSD / WASD / flèches</b> = bouger · <b>souris glissée</b> = tourner la caméra<br>
+  <button id="playExit" style="margin-top:8px;padding:8px 16px;border:0;border-radius:6px;background:#d6553f;color:#fff;font-weight:bold;cursor:pointer">← Retour éditeur</button>
+</div>
 <div id="toast"></div>
 <script type="module">
 import * as THREE from 'three';
@@ -369,10 +374,12 @@ function updateGhost(e) {
 // ---------- Interaction ----------
 let dragged = false, downXY = null;
 renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (playMode) return;
   downXY = { x: e.clientX, y: e.clientY }; dragged = false;
   if (moveMode && e.button === 0) { const id = pickObject(e); if (id != null) { grabbed = objects.get(id); ctr.enabled = false; } }   // attrape l'objet sous le curseur (bloque la caméra le temps du glissé)
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
+  if (playMode) { if (e.buttons) camYaw -= e.movementX * 0.005; return; }   // mode Jeu : souris glissée = tourner la caméra
   if (downXY && Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y) > 6) dragged = true;
   if (grabbed) {   // glisse librement (aimanté grille 0.5) ; une PAIRE se déplace EN BLOC (les 2 gardent leur écartement, restent en face)
     const w = worldPoint(e); if (w) {
@@ -392,6 +399,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   updateGhost(e);
 });
 renderer.domElement.addEventListener('pointerup', (e) => {
+  if (playMode) return;
   if (grabbed) { grabbed = null; ctr.enabled = true; scheduleSave(); downXY = null; return; }   // fin du déplacement
   const c = cellUnder(e);
   if (!moveMode && !dragged && c) {
@@ -551,8 +559,37 @@ for (const k in TRAIN_PRESETS) { const o = document.createElement('option'); o.v
 trainSel.value = curTrain;
 trainSel.onchange = () => { curTrain = trainSel.value; rebuildTrains(); scheduleSave(); };
 
+// ---------- MODE JEU : se balader dans le monde construit ----------
+let playMode = false, hero = null, heroMix = null, heroFoot = 0, camYaw = 0;
+const pk = {};
+new GLTFLoader().load('models/character.glb', (g) => {
+  hero = g.scene; hero.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(m => { if (m) m.side = THREE.DoubleSide; }); } });
+  hero.updateMatrixWorld(true); let b = new THREE.Box3().setFromObject(hero); hero.scale.setScalar(1.8 / ((b.max.y - b.min.y) || 1));
+  hero.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(hero); heroFoot = -b.min.y;
+  if (g.animations && g.animations.length) { heroMix = new THREE.AnimationMixer(hero); const clip = g.animations[0].clone(); clip.tracks = clip.tracks.filter(t => !/\.position$/.test(t.name)); heroMix.clipAction(clip).play(); }
+  hero.visible = false; scene.add(hero);
+});
+function togglePlay(on) {
+  playMode = on;
+  document.getElementById('panel').style.display = on ? 'none' : '';
+  document.getElementById('hud').style.display = on ? 'none' : '';
+  document.getElementById('playHud').style.display = on ? 'block' : 'none';
+  ctr3.enabled = !on; ctr2.enabled = false;
+  if (ghost) ghost.visible = false;
+  if (on) {
+    cam = cam3; if (!hero) { toast('⏳ Perso en cours de chargement…'); playMode = false; document.getElementById('panel').style.display = ''; document.getElementById('playHud').style.display = 'none'; return; }
+    const box = new THREE.Box3(); for (const m of [grid, objects, halfTiles]) for (const e of m.values()) box.expandByObject(e.mesh);
+    const c = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+    hero.position.set(c.x, heroFoot, c.z); hero.visible = true; camYaw = 0;
+  } else { if (hero) hero.visible = false; ctr = cam === cam3 ? ctr3 : ctr2; if (cam === cam3) ctr3.enabled = true; }
+}
+document.getElementById('play').onclick = () => togglePlay(true);
+document.getElementById('playExit').onclick = () => togglePlay(false);
+addEventListener('keydown', (e) => { pk[e.key.toLowerCase()] = true; });
+addEventListener('keyup', (e) => { pk[e.key.toLowerCase()] = false; });
+
 // hook de test (inoffensif)
-window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); },
+window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); }, togglePlay,
   placeHalfXZ: (x, z, type, rot) => { const sx = Math.round(x / HG) * HG, sz = Math.round(z / HG) * HG, k = sx + '_' + sz; const m = ASSET[type].clone(true); m.position.set(sx, 0, sz); m.rotation.y = (rot || 0) * Math.PI / 2; worldGroup.add(m); halfTiles.set(k, { type, x: sx, z: sz, rot: rot || 0, mesh: m }); } };
 
 // ---------- Boucle ----------
@@ -560,7 +597,23 @@ let _lt = 0;
 renderer.setAnimationLoop((t) => {
   const dt = _lt ? Math.min(0.05, (t - _lt) / 1000) : 0.016; _lt = t;
   for (const tr of trains) { tr.p += tr.speed * dt; if (tr.p > tr.max + tr.len) tr.p = tr.min; if (tr.axis === 'x') tr.group.position.x = tr.p; else tr.group.position.z = tr.p; }   // le train roule le long de sa voie (X ou Z) et boucle
-  ctr.update(); renderer.render(scene, cam);
+  if (playMode && hero) {
+    let mx = 0, mz = 0;
+    if (pk['z'] || pk['w'] || pk['arrowup']) mz += 1;
+    if (pk['s'] || pk['arrowdown']) mz -= 1;
+    if (pk['q'] || pk['a'] || pk['arrowleft']) mx -= 1;
+    if (pk['d'] || pk['arrowright']) mx += 1;
+    if (mx || mz) {
+      const fx = Math.sin(camYaw), fz = Math.cos(camYaw), rx = Math.cos(camYaw), rz = -Math.sin(camYaw);
+      let dx = fx * mz + rx * mx, dz = fz * mz + rz * mx; const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
+      const spd = 16 * dt; hero.position.x += dx * spd; hero.position.z += dz * spd; hero.rotation.y = Math.atan2(dx, dz);
+      if (heroMix) heroMix.timeScale = 1;
+    } else if (heroMix) heroMix.timeScale = 0.0001;
+    if (heroMix) heroMix.update(dt);
+    cam3.position.set(hero.position.x - Math.sin(camYaw) * 11, heroFoot + 6, hero.position.z - Math.cos(camYaw) * 11);
+    cam3.lookAt(hero.position.x, heroFoot + 1.5, hero.position.z);
+  } else ctr.update();
+  renderer.render(scene, cam);
 });
 </script>
 </body>
