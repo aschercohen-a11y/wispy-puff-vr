@@ -241,8 +241,9 @@ function placeTile(gx, gz, type, rot) {
   const mesh = ASSET[type].clone(true);
   mesh.position.set(gx * T, 0, gz * T); mesh.rotation.y = rot * Math.PI / 2;
   worldGroup.add(mesh); grid.set(key(gx, gz), { type, rot, mesh });
+  if (type === 'rail') scheduleTrains();
 }
-function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { worldGroup.remove(e.mesh); grid.delete(key(gx, gz)); } }
+function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { const wasRail = e.type === 'rail'; worldGroup.remove(e.mesh); grid.delete(key(gx, gz)); if (wasRail) scheduleTrains(); } }
 let objId = 0, pairSeq = 0;
 function addObject(type, gx, gz, ox, oz, rot, meta) {   // pose 1 objet précis (id unique → suppressible seul)
   const a = OBJ_ASSET[type]; if (!a) return;
@@ -268,7 +269,7 @@ function pickObject(e) {   // id de l'objet sous le curseur (pour supprimer celu
 }
 function eraseAt(e, gx, gz) { const id = pickObject(e); if (id != null) removeObjectById(id); else removeTile(gx, gz); }   // enlève l'objet précis cliqué (ex : UN seul lampadaire), sinon la tuile
 function placeReady() { pendingObjects = pendingObjects.filter(o => { if (OBJ_ASSET[o.type]) { addObject(o.type, o.gx, o.gz, o.ox || 0, o.oz || 0, o.rot || 0, { pid: o.pid, axis: o.axis, side: o.side }); return false; } return true; }); refresh(); }
-function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); for (const e of objects.values()) worldGroup.remove(e.mesh); grid.clear(); objects.clear(); pendingObjects = []; refresh(); }
+function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); for (const e of objects.values()) worldGroup.remove(e.mesh); grid.clear(); objects.clear(); pendingObjects = []; scheduleTrains(); refresh(); }
 
 // ---------- Grille de repère + fantôme ----------
 const gridHelper = new THREE.GridHelper(T * 40, 40, 0x88b0d0, 0x9ec4de); gridHelper.position.y = 0.001; gridHelper.material.opacity = 0.35; gridHelper.material.transparent = true; scene.add(gridHelper);
@@ -410,11 +411,49 @@ async function load() {
 }
 load();
 
+// ---------- TRAINS (Kenney) qui roulent sur les tuiles Rail horizontales ----------
+const TRAIN_SCALE = 1.5, TRAIN_Y = 0.12;
+const TRAIN_FILES = { loco: 'train-loco', wag1: 'train-wag1', wag2: 'train-wag2', wag3: 'train-wag3', wag4: 'train-wag4' };
+const TRAIN_ASSET = {};
+function prepCar(root) {
+  unlit(root); root.rotation.y = -Math.PI / 2;                         // longueur (Z du modèle) alignée sur X, face +X
+  const wrap = new THREE.Group(); wrap.add(root); wrap.updateMatrixWorld(true);
+  let b = new THREE.Box3().setFromObject(wrap);
+  root.position.x -= (b.min.x + b.max.x) / 2; root.position.y -= b.min.y;   // centré en X, base à 0
+  wrap.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(wrap);
+  return { wrap, len: b.max.x - b.min.x };
+}
+const gltf2 = new GLTFLoader();
+for (const k in TRAIN_FILES) gltf2.load('models/' + TRAIN_FILES[k] + '.glb', (g) => { TRAIN_ASSET[k] = prepCar(g.scene); scheduleTrains(); });
+function buildConsist() {   // loco à l'avant (x=0) + wagons derrière (x<0)
+  const g = new THREE.Group(), order = ['loco', 'wag1', 'wag2', 'wag3', 'wag4']; let x = 0, first = true;
+  for (const c of order) { const car = TRAIN_ASSET[c]; if (!car) continue; if (!first) x -= 0.2; const inst = car.wrap.clone(true); inst.position.x = x - car.len / 2; g.add(inst); x -= car.len; first = false; }
+  g.scale.setScalar(TRAIN_SCALE); return { group: g, length: -x * TRAIN_SCALE };
+}
+let trains = [], trainsT = null;
+function clearTrains() { for (const t of trains) scene.remove(t.group); trains = []; }
+function scheduleTrains() { clearTimeout(trainsT); trainsT = setTimeout(rebuildTrains, 150); }
+function rebuildTrains() {
+  clearTrains(); if (!TRAIN_ASSET.loco) return;
+  const rows = {};   // rangées de rails horizontaux (rot pair) groupées par gz (gx/gz lus depuis la clé)
+  for (const [k, e] of grid) if (e.type === 'rail' && e.rot % 2 === 0) { const [gx, gz] = k.split('_').map(Number); (rows[gz] = rows[gz] || []).push(gx); }
+  for (const gz in rows) {
+    const gxs = rows[gz], minx = Math.min(...gxs) * T - T / 2, maxx = Math.max(...gxs) * T + T / 2;
+    const c = buildConsist(); c.group.position.set(minx - c.length, TRAIN_Y, Number(gz) * T); scene.add(c.group);
+    trains.push({ group: c.group, len: c.length, xMin: minx - c.length, xMax: maxx, x: minx - c.length, speed: 7 });
+  }
+}
+
 // hook de test (inoffensif)
-window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET };
+window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains };
 
 // ---------- Boucle ----------
-renderer.setAnimationLoop(() => { ctr.update(); renderer.render(scene, cam); });
+let _lt = 0;
+renderer.setAnimationLoop((t) => {
+  const dt = _lt ? Math.min(0.05, (t - _lt) / 1000) : 0.016; _lt = t;
+  for (const tr of trains) { tr.x += tr.speed * dt; if (tr.x > tr.xMax + tr.len) tr.x = tr.xMin; tr.group.position.x = tr.x; }   // le train roule et boucle
+  ctr.update(); renderer.render(scene, cam);
+});
 </script>
 </body>
 </html>
