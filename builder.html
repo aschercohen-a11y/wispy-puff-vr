@@ -286,7 +286,7 @@ const PAIRED = { lamp: true };     // objets posés en PAIRE (un de chaque côt�
 const objOff = { lamp: 5 };        // écart à l'axe de la route pour les paires (5 = milieu trottoir ; 3.2 ≈ bord route ; 6.6 ≈ bord extérieur)
 function offFor(t) { return objOff[t] != null ? objOff[t] : 5; }
 const worldGroup = new THREE.Group(); scene.add(worldGroup);
-let curType = 'route', curRot = 0, eraseMode = false, moveMode = false, grabbed = null;
+let curType = 'route', curRot = 0, eraseMode = false, moveMode = false, grabbed = null, selObj = null;
 
 function key(gx, gz) { return gx + '_' + gz; }
 function placeTile(gx, gz, type, rot) {
@@ -305,9 +305,10 @@ function removeTile(gx, gz) { const e = grid.get(key(gx, gz)); if (e) { const wa
 let objId = 0, pairSeq = 0;
 function addObject(type, gx, gz, ox, oz, rot, meta) {   // pose 1 objet précis (id unique → suppressible seul)
   const a = OBJ_ASSET[type]; if (!a) return;
-  const mesh = a.clone(true); mesh.position.set(gx * T + ox, OBJ_Y, gz * T + oz); mesh.rotation.y = rot * Math.PI / 2; mesh.scale.setScalar(scaleFor(type));
+  const sc = (meta && meta.sc) || 1;
+  const mesh = a.clone(true); mesh.position.set(gx * T + ox, OBJ_Y, gz * T + oz); mesh.rotation.y = rot * Math.PI / 2; mesh.scale.setScalar(scaleFor(type) * sc);
   const id = ++objId; mesh.userData.objId = id; worldGroup.add(mesh);
-  objects.set(id, { id, type, gx, gz, ox, oz, rot, mesh, pid: meta && meta.pid, axis: meta && meta.axis, side: meta && meta.side });
+  objects.set(id, { id, type, gx, gz, ox, oz, rot, mesh, sc, pid: meta && meta.pid, axis: meta && meta.axis, side: meta && meta.side });
 }
 function snap(v) { return Math.round(v / 0.5) * 0.5; }   // grille fine 0.5 pour aligner/espacer précisément
 function removeObjectById(id) { const e = objects.get(id); if (e) { worldGroup.remove(e.mesh); objects.delete(id); } }
@@ -337,7 +338,7 @@ function eraseAt(e, gx, gz) {   // objet précis > demi-bloc (grille fine) > tui
   const w = worldPoint(e); if (w) { const k = (Math.round(w.x / HG) * HG) + '_' + (Math.round(w.z / HG) * HG); const h = halfTiles.get(k); if (h) { worldGroup.remove(h.mesh); halfTiles.delete(k); return; } }
   removeTile(gx, gz);
 }
-function placeReady() { pendingObjects = pendingObjects.filter(o => { if (OBJ_ASSET[o.type]) { addObject(o.type, o.gx, o.gz, o.ox || 0, o.oz || 0, o.rot || 0, { pid: o.pid, axis: o.axis, side: o.side }); return false; } return true; }); refresh(); }
+function placeReady() { pendingObjects = pendingObjects.filter(o => { if (OBJ_ASSET[o.type]) { addObject(o.type, o.gx, o.gz, o.ox || 0, o.oz || 0, o.rot || 0, { sc: o.sc, pid: o.pid, axis: o.axis, side: o.side }); return false; } return true; }); refresh(); }
 function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); for (const e of objects.values()) worldGroup.remove(e.mesh); for (const e of halfTiles.values()) worldGroup.remove(e.mesh); grid.clear(); objects.clear(); halfTiles.clear(); pendingObjects = []; scheduleTrains(); refresh(); }
 
 // ---------- Grille de repère + fantôme ----------
@@ -377,7 +378,7 @@ let dragged = false, downXY = null;
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (playMode) return;
   downXY = { x: e.clientX, y: e.clientY }; dragged = false;
-  if (moveMode && e.button === 0) { const id = pickObject(e); if (id != null) { grabbed = objects.get(id); ctr.enabled = false; } }   // attrape l'objet sous le curseur (bloque la caméra le temps du glissé)
+  if (moveMode && e.button === 0) { const id = pickObject(e); if (id != null) { grabbed = objects.get(id); selObj = grabbed; ctr.enabled = false; updateSizeCtl(); } }   // attrape + sélectionne l'objet (bloque la caméra le temps du glissé)
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (playMode) { if (e.buttons) camYaw -= e.movementX * 0.005; return; }   // mode Jeu : souris glissée = tourner la caméra
@@ -416,7 +417,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   downXY = null;
 });
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());   // pas de menu navigateur ; suppression gérée au relâchement (un clic droit GLISSÉ = pan de vue, ne supprime pas)
-addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') { curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°'; } });
+addEventListener('keydown', (e) => { if ((e.key === 'r' || e.key === 'R') && !playMode) rotateAction(); });
 
 // ---------- UI : palette en rubriques repliables ----------
 const pal = document.getElementById('pal');
@@ -430,21 +431,30 @@ for (const cat of CATS) {
 }
 function highlight() { for (const b of pal.querySelectorAll('button.tile')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; updateSizeCtl(); updateModeBtns(); }
 function updateSizeCtl() {
-  const el = document.getElementById('sizeCtl'); const isObj = !eraseMode && curType && kindOf(curType) === 'object';
-  el.style.display = isObj ? 'block' : 'none'; if (isObj) document.getElementById('szV').textContent = Math.round(scaleFor(curType) * 100) + '%';
+  const el = document.getElementById('sizeCtl'), isObj = !eraseMode && !moveMode && curType && kindOf(curType) === 'object', isSel = moveMode && selObj;
+  el.style.display = (isObj || isSel) ? 'block' : 'none';
+  if (isObj) document.getElementById('szV').textContent = Math.round(scaleFor(curType) * 100) + '%';
+  else if (isSel) document.getElementById('szV').textContent = Math.round(scaleFor(selObj.type) * (selObj.sc || 1) * 100) + '%';
   document.getElementById('offBox').style.display = (isObj && PAIRED[curType]) ? 'block' : 'none';   // écart : seulement pour les paires (lampadaire)
 }
-function applyScale(type) { for (const e of objects.values()) if (e.type === type) e.mesh.scale.setScalar(scaleFor(type)); if (ghost && curType === type) ghost.scale.setScalar(scaleFor(type)); }
-function bumpScale(f) { if (!curType || kindOf(curType) !== 'object') return; objScale[curType] = Math.min(3, Math.max(0.15, scaleFor(curType) * f)); applyScale(curType); updateSizeCtl(); scheduleSave(); }   // re-dimensionne aussi les objets déjà posés de ce type
+function applyScale(type) { for (const e of objects.values()) if (e.type === type) e.mesh.scale.setScalar(scaleFor(type) * (e.sc || 1)); if (ghost && curType === type) ghost.scale.setScalar(scaleFor(type)); }
+function bumpScale(f) {
+  if (moveMode && selObj) { selObj.sc = Math.min(3, Math.max(0.15, (selObj.sc || 1) * f)); selObj.mesh.scale.setScalar(scaleFor(selObj.type) * selObj.sc); updateSizeCtl(); scheduleSave(); return; }   // taille de CET objet précis
+  if (!curType || kindOf(curType) !== 'object') return; objScale[curType] = Math.min(3, Math.max(0.15, scaleFor(curType) * f)); applyScale(curType); updateSizeCtl(); scheduleSave();   // re-dimensionne tous les objets de ce type
+}
 function applyOffset(type) { const off = offFor(type); for (const e of objects.values()) if (e.type === type && e.pid) { if (e.axis === 'x') e.oz = e.side * off; else e.ox = e.side * off; e.mesh.position.set(e.gx * T + e.ox, 0.03, e.gz * T + e.oz); } }
 function bumpOffset(d) { if (!curType || !PAIRED[curType]) return; objOff[curType] = Math.min(6.6, Math.max(3.2, offFor(curType) + d)); applyOffset(curType); scheduleSave(); }   // rapproche/éloigne la paire de la route
 document.getElementById('szM').onclick = () => bumpScale(0.85);
 document.getElementById('szP').onclick = () => bumpScale(1.18);
 document.getElementById('offM').onclick = () => bumpOffset(-0.6);
 document.getElementById('offP').onclick = () => bumpOffset(0.6);
-document.getElementById('rotate').onclick = () => { curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°'; };
+function rotateAction() {
+  if (moveMode && selObj) { selObj.rot = (selObj.rot + 1) % 4; selObj.mesh.rotation.y = selObj.rot * Math.PI / 2; scheduleSave(); return; }   // tourne l'objet sélectionné
+  curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°';
+}
+document.getElementById('rotate').onclick = rotateAction;
 document.getElementById('erase').onclick = () => { eraseMode = !eraseMode; if (eraseMode) moveMode = false; if (ghost) ghost.visible = false; highlight(); };
-document.getElementById('move').onclick = () => { moveMode = !moveMode; if (moveMode) { eraseMode = false; curType = null; } if (ghost) ghost.visible = false; highlight(); };
+document.getElementById('move').onclick = () => { moveMode = !moveMode; if (moveMode) { eraseMode = false; curType = null; } else selObj = null; if (ghost) ghost.visible = false; highlight(); };
 function updateModeBtns() { const mv = document.getElementById('move'); mv.style.background = moveMode ? '#36e0d0' : ''; mv.style.color = moveMode ? '#023' : '#fff'; }
 document.getElementById('clear').onclick = () => { if (confirm('Vider toute la carte ?')) { clearAll(); scheduleSave(); } };
 document.getElementById('view').onclick = () => {
@@ -472,7 +482,7 @@ function scheduleSave() { clearTimeout(saveT); saveT = setTimeout(() => saveNow(
 function serialize() {
   const tiles = [], objs = [];
   for (const [k, e] of grid) { const [gx, gz] = k.split('_').map(Number); tiles.push({ gx, gz, type: e.type, rot: e.rot }); }
-  for (const e of objects.values()) objs.push({ gx: e.gx, gz: e.gz, ox: e.ox, oz: e.oz, type: e.type, rot: e.rot, pid: e.pid, axis: e.axis, side: e.side });
+  for (const e of objects.values()) objs.push({ gx: e.gx, gz: e.gz, ox: e.ox, oz: e.oz, type: e.type, rot: e.rot, sc: e.sc, pid: e.pid, axis: e.axis, side: e.side });
   const halfs = []; for (const e of halfTiles.values()) halfs.push({ x: e.x, z: e.z, type: e.type, rot: e.rot });
   return { tiles, objects: objs, halfs, objScale, objOff, train: curTrain };
 }
