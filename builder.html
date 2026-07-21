@@ -311,6 +311,15 @@ const STREET = {
   fontaineb: { label: '⛲ Fontaine à boire',  foot: 1.4 },
 };
 const STREET_KEYS = ['banc', 'poubelle', 'boite', 'borne', 'hydrant', 'fontaineb'];   // ordre = gauche→droite dans le GLB
+// Immeubles de rue : lots de 3 immeubles par GLB, découpés au chargement (texture partagée) → alignables comme du LEGO
+const ROWB = {
+  petit_bakery: { label: '🥐 Boulangerie (rue)', foot: 9.5 },
+  petit_books:  { label: '📗 Librairie (rue)',   foot: 9.5 },
+  petit_cafe:   { label: '☕ Café (rue)',         foot: 9.5 },
+  grand1:       { label: '🏢 Grand immeuble crème', foot: 9 },
+  grand2:       { label: '🏢 Grand immeuble bleu',  foot: 9 },
+  grand3:       { label: '🏢 Grand immeuble rouge', foot: 9 },
+};
 // découpe un mesh fusionné en N îlots le long de X (objets alignés espacés) → N géométries recentrées et posées au sol
 function splitByX(mesh, N) {
   const g = mesh.geometry, pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv, idx = g.index;
@@ -348,6 +357,24 @@ gltf.load('models/mobilier_urbain.glb', (g) => {
   });
   placeReady();
 });
+// IMMEUBLES DE RUE : 2 GLB (3 immeubles chacun) → découpés en 3, texture partagée par lot, chacun posable/alignable
+function loadRow(file, keys) {
+  gltf.load('models/' + file, (g) => {
+    let mesh = null; g.scene.traverse(o => { if (o.isMesh && !mesh) mesh = o; });
+    if (!mesh) return;
+    const src = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material; if (src.map) { src.map.colorSpace = THREE.SRGBColorSpace; sharpTex(src.map); }
+    const sharedMat = new THREE.MeshBasicMaterial({ map: src.map || null, color: 0xffffff, side: THREE.DoubleSide });
+    const pieces = splitByX(mesh, keys.length);
+    pieces.forEach((pc, i) => {
+      const key = keys[i]; if (!key) return;
+      OBJ_ASSET[key] = fitObject(new THREE.Mesh(pc.geo, sharedMat), ROWB[key].foot);
+      const btn = document.querySelector('button[data-t="' + key + '"]'); if (btn) { btn.disabled = false; btn.textContent = ROWB[key].label; }
+    });
+    placeReady();
+  });
+}
+loadRow('row_petit.glb', ['petit_bakery', 'petit_books', 'petit_cafe']);
+loadRow('row_grand.glb', ['grand1', 'grand2', 'grand3']);
 // GRANDE ROUE : pied Meshy + roue Meshy (redressée) + rotation animée. Roue centrée ENTRE les montants du pied.
 (function () {
   const gl = new GLTFLoader();
@@ -385,7 +412,7 @@ gltf.load('models/rail_meshy.glb', (g) => {
   for (const [k, e] of grid) if (e.type === 'rail_meshy') { worldGroup.remove(e.mesh); const [gx, gz] = k.split('_').map(Number); const mesh = grp.clone(true); mesh.position.set(gx * T, 0, gz * T); mesh.rotation.y = e.rot * Math.PI / 2; worldGroup.add(mesh); e.mesh = mesh; }
   scheduleTrains();
 });
-function kindOf(t) { return TILES[t] ? 'tile' : ((HOUSES[t] || BUILDINGS[t] || DECO[t] || STREET[t]) ? 'object' : null); }
+function kindOf(t) { return TILES[t] ? 'tile' : ((HOUSES[t] || BUILDINGS[t] || DECO[t] || STREET[t] || ROWB[t]) ? 'object' : null); }
 function assetOf(t) { return TILES[t] ? ASSET[t] : OBJ_ASSET[t]; }
 
 // ---------- État de la carte ----------
@@ -541,12 +568,12 @@ addEventListener('keydown', (e) => { if ((e.key === 'r' || e.key === 'R') && !pl
 
 // ---------- UI : palette en rubriques repliables ----------
 const pal = document.getElementById('pal');
-const CATS = [{ name: '🛣️ Routes', items: TILES, open: true }, { name: '🏠 Maisons', items: HOUSES, open: false }, { name: '🏢 Immeubles & lieux', items: BUILDINGS, open: false }, { name: '🪑 Mobilier urbain', items: STREET, open: false }, { name: '🌿 Déco', items: DECO, open: false }];
+const CATS = [{ name: '🛣️ Routes', items: TILES, open: true }, { name: '🏠 Maisons', items: HOUSES, open: false }, { name: '🏢 Immeubles & lieux', items: BUILDINGS, open: false }, { name: '🏘️ Immeubles de rue', items: ROWB, open: false }, { name: '🪑 Mobilier urbain', items: STREET, open: false }, { name: '🌿 Déco', items: DECO, open: false }];
 for (const cat of CATS) {
   const wrap = document.createElement('div'); wrap.className = 'cat' + (cat.open ? ' open' : '');
   const head = document.createElement('div'); head.className = 'head'; head.innerHTML = '<span>' + cat.name + '</span><span class="arw">▸</span>'; head.onclick = () => wrap.classList.toggle('open');
   const body = document.createElement('div'); body.className = 'body';
-  for (const k in cat.items) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = cat.items[k].label; b.dataset.t = k; if ((cat.items === HOUSES || cat.items === BUILDINGS || cat.items === STREET) && !OBJ_ASSET[k]) { b.disabled = true; b.textContent = '⏳ ' + cat.items[k].label; } if (cat.items === TILES && TILES[k].async) b.disabled = true; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; body.appendChild(b); }
+  for (const k in cat.items) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = cat.items[k].label; b.dataset.t = k; if ((cat.items === HOUSES || cat.items === BUILDINGS || cat.items === STREET || cat.items === ROWB) && !OBJ_ASSET[k]) { b.disabled = true; b.textContent = '⏳ ' + cat.items[k].label; } if (cat.items === TILES && TILES[k].async) b.disabled = true; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; body.appendChild(b); }
   wrap.appendChild(head); wrap.appendChild(body); pal.appendChild(wrap);
 }
 function highlight() { for (const b of pal.querySelectorAll('button.tile')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; updateSizeCtl(); updateModeBtns(); }
