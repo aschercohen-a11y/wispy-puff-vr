@@ -97,7 +97,7 @@ scene.fog = new THREE.Fog(0xbfe0f6, 210, 680);   // portée étendue → les cha
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.xr.enabled = true;   // WebXR : runner jouable en VR sur le casque
-try { renderer.xr.setFramebufferScaleFactor(1.2); } catch (e) {}   // léger suréchantillonnage → net (le culling agressif libère assez de GPU)
+try { renderer.xr.setFramebufferScaleFactor(0.85); } catch (e) {}   // sous-résolution → PRIORITÉ 72 img/s (sinon réprojection = flou en mouvement)
 document.body.appendChild(renderer.domElement);
 const vrBtn = VRButton.createButton(renderer); vrBtn.style.zIndex = 70; document.body.appendChild(vrBtn);   // bouton « Enter VR » (visible sur le Quest)
 const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();   // filtrage anisotrope max → textures nettes même de biais (rue qui fuit)
@@ -696,9 +696,9 @@ function buildBg() {
     // 3 couches à distances TRÈS différentes → parallaxe (les proches défilent vite, les lointaines quasi immobiles)
     // teinte : proche = roche naturelle, milieu = bleuté, lointain = lavande brumeux (perspective atmosphérique)
     const layers = [
-      { off: 8, jit: 18, n: 13, h: [34, 52], tint: new THREE.Color(0xeff1f5) },   // proche
-      { off: 78, jit: 30, n: 12, h: [64, 92], tint: new THREE.Color(0xc4d0ec) },  // milieu (bien plus loin + plus haut)
-      { off: 180, jit: 46, n: 11, h: [110, 165], tint: new THREE.Color(0xacbae2) }, // lointain (énorme, à peine mobile)
+      { off: 8, jit: 18, n: 8, h: [34, 52], tint: new THREE.Color(0xeff1f5) },   // proche
+      { off: 78, jit: 30, n: 7, h: [64, 92], tint: new THREE.Color(0xc4d0ec) },  // milieu (bien plus loin + plus haut)
+      { off: 180, jit: 46, n: 6, h: [110, 165], tint: new THREE.Color(0xacbae2) }, // lointain (énorme, à peine mobile)
     ];
     for (let L = 0; L < layers.length; L++) {
       const lg = layers[L];
@@ -967,7 +967,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   runAxis = road.axis; runFixed = road.fixed * T; runStart = road.a * T - T / 2 + 4; runEnd = road.b * T + T / 2;
   runP = runStart; runLane = 0; runY = 0; runVY = 0;
   dolly.add(cam3); ctr3.enabled = false; vignette.visible = true; if (hero) hero.visible = true;   // 3e personne : on suit le perso
-  try { renderer.xr.setFoveation(0.25); } catch (e) {}   // flou périphérique léger → côtés plus nets (palmier, etc.)
+  try { renderer.xr.setFoveation(0.6); } catch (e) {}   // flou périphérique fort → gros gain de perf (le centre reste net)
   vrReady = true;
 });
 renderer.xr.addEventListener('sessionend', () => {
@@ -987,7 +987,7 @@ function readVRInput() {
   if (!jump) jumpReady = true; else if (jumpReady && runY <= 0.02) { runVY = JUMP_V; jumpReady = false; }
 }
 const VR_BACK = 6, VR_UP = 1.5;   // caméra : recul derrière le perso + élévation (vue « Subway » un peu plongeante)
-const CULL_OBJ2 = 80 * 80, CULL_TILE2 = 135 * 135;   // objets (lourds) masqués au-delà de 80 ; tuiles (route/herbe, légères) au-delà de 135
+const CULL_OBJ2 = 55 * 55, CULL_TILE2 = 95 * 95;   // couloir serré : objets lourds masqués au-delà de 55, tuiles au-delà de 95 (priorité fluidité)
 function cullRunner(px, pz) {
   for (const e of objects.values()) { const dx = e.mesh.position.x - px, dz = e.mesh.position.z - pz; e.mesh.visible = (dx * dx + dz * dz) < CULL_OBJ2; }
   for (const e of grid.values()) { const dx = e.mesh.position.x - px, dz = e.mesh.position.z - pz; e.mesh.visible = (dx * dx + dz * dz) < CULL_TILE2; }
