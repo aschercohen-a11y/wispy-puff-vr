@@ -91,7 +91,7 @@ const LAYOUT_ID = 2;   // id=2 = carte LEGO (id=1 = ancien village, préservé)
 // ---------- Scène ----------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xbfe0f6);
-scene.fog = new THREE.Fog(0xbfe0f6, 140, 340);
+scene.fog = new THREE.Fog(0xbfe0f6, 210, 680);   // portée étendue → les chaînes de montagnes lointaines restent visibles (profondeur)
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 document.body.appendChild(renderer.domElement);
@@ -561,7 +561,8 @@ let hillsOn = true, bgSig = '', bgExt = 14;
 const MT_CONE = new THREE.ConeGeometry(1, 1, 6);   // cône unité (fallback si les modèles ne sont pas encore chargés)
 const SHARED = new Set([MT_CONE]);   // géométries + matériaux partagés (templates montagnes) → ne jamais disposer
 function hillMat(c) { return new THREE.MeshBasicMaterial({ color: c }); }   // unlit + fog auto → le lointain se fond dans le ciel
-function clearBg() { while (bgGroup.children.length) { const m = bgGroup.children.pop(); if (m.geometry && !SHARED.has(m.geometry)) m.geometry.dispose(); if (m.material && !SHARED.has(m.material)) m.material.dispose(); } }
+function clearBg() { while (bgGroup.children.length) { const m = bgGroup.children.pop(); m.traverse(o => { if (o.geometry && !SHARED.has(o.geometry)) o.geometry.dispose(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(mm => { if (!SHARED.has(mm)) mm.dispose(); }); }); } }
+function tintMat(m, tint) { const n = m.clone(); n.color = (m.color ? m.color.clone() : new THREE.Color(0xffffff)).multiply(tint); return n; }   // teinte par couche (multiplie la texture)
 // modèles de montagnes Meshy (chargés une fois, clonés tout autour de la ville)
 const MT = {}; let mtReady = false;
 for (const nm of ['montagne1', 'montagne2']) {
@@ -573,10 +574,11 @@ for (const nm of ['montagne1', 'montagne2']) {
     mtReady = true; bgSig = ''; buildBg();   // reconstruit l'anneau avec les vraies montagnes
   });
 }
-function placeMountain(nm, x, z, H, rotY) {
+function placeMountain(nm, x, z, H, rotY, tint) {
   const t = MT[nm]; if (!t) return;
   const c = t.scene.clone(true); const s = H / t.h;
   c.scale.setScalar(s); c.position.set(x, -t.minY * s - 2, z); c.rotation.y = rotY;   // base posée au sol, légèrement enfoncée
+  if (tint) c.traverse(o => { if (o.isMesh && o.material) o.material = Array.isArray(o.material) ? o.material.map(m => tintMat(m, tint)) : tintMat(o.material, tint); });
   bgGroup.add(c);
 }
 function makeMountain(x, z, rock, snow, R, H, rotY) {
@@ -608,23 +610,24 @@ function buildBg() {
   bgGroup.position.set(cx, 0, cz);
   const R = ext + 34;
   // grand sol vert circulaire → supprime le vide bleu quadrillé autour de la ville
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(Math.max(R + 190, 380), 64), hillMat(0x86c76a));
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(Math.max(R + 360, 620), 64), hillMat(0x86c76a));
   ground.rotation.x = -Math.PI / 2; ground.position.y = -0.06; bgGroup.add(ground);
   if (mtReady) {
-    // vraies montagnes Meshy à glaciers, en 2 anneaux (le lointain bleuté par le brouillard)
-    const N1 = 13;
-    for (let i = 0; i < N1; i++) {
-      const a = (i / N1) * Math.PI * 2 + (Math.random() - 0.5) * 0.20;
-      const rr = R + 20 + (Math.random() - 0.5) * 20;
-      const H = 40 + Math.random() * 22;
-      placeMountain(i % 2 ? 'montagne2' : 'montagne1', Math.cos(a) * rr, Math.sin(a) * rr, H, Math.random() * Math.PI * 2);
-    }
-    const N2 = 11;
-    for (let i = 0; i < N2; i++) {
-      const a = ((i + 0.5) / N2) * Math.PI * 2 + (Math.random() - 0.5) * 0.20;
-      const rr = R + 70 + (Math.random() - 0.5) * 26;
-      const H = 56 + Math.random() * 28;
-      placeMountain(i % 2 ? 'montagne1' : 'montagne2', Math.cos(a) * rr, Math.sin(a) * rr, H, Math.random() * Math.PI * 2);
+    // 3 couches à distances TRÈS différentes → parallaxe (les proches défilent vite, les lointaines quasi immobiles)
+    // teinte : proche = roche naturelle, milieu = bleuté, lointain = lavande brumeux (perspective atmosphérique)
+    const layers = [
+      { off: 8, jit: 18, n: 13, h: [34, 52], tint: new THREE.Color(0xeff1f5) },   // proche
+      { off: 78, jit: 30, n: 12, h: [64, 92], tint: new THREE.Color(0xc4d0ec) },  // milieu (bien plus loin + plus haut)
+      { off: 180, jit: 46, n: 11, h: [110, 165], tint: new THREE.Color(0xacbae2) }, // lointain (énorme, à peine mobile)
+    ];
+    for (let L = 0; L < layers.length; L++) {
+      const lg = layers[L];
+      for (let i = 0; i < lg.n; i++) {
+        const a = ((i + L * 0.4) / lg.n) * Math.PI * 2 + (Math.random() - 0.5) * 0.22;
+        const rr = R + lg.off + (Math.random() - 0.5) * lg.jit;
+        const H = lg.h[0] + Math.random() * (lg.h[1] - lg.h[0]);
+        placeMountain(i % 2 ? 'montagne2' : 'montagne1', Math.cos(a) * rr, Math.sin(a) * rr, H, Math.random() * Math.PI * 2, lg.tint);
+      }
     }
   } else {
     // fallback tant que les modèles ne sont pas chargés : cônes codés
