@@ -76,6 +76,7 @@
 <div id="hud">Posés : <b id="count">0</b> · clic gauche = poser · clic droit = effacer · molette = zoom · R = tourner · <b>Ctrl+Z = annuler</b></div>
 <div id="playHud" style="display:none;position:fixed;top:10px;left:10px;z-index:60;background:rgba(12,22,42,.92);color:#dff;padding:10px 14px;border-radius:10px;font:13px sans-serif;border:2px solid #6fd">
   🏃 Le perso court tout seul ! <b>← →</b> (ou Q/D) = changer de voie · <b>Espace / ↑</b> = sauter<br>
+  🖱️ <b>Glisser la souris</b> = tourner la caméra (regarde les montagnes en courant) · <b>C</b> = revenir derrière le perso<br>
   <button id="playExit" style="margin-top:8px;padding:8px 16px;border:0;border-radius:6px;background:#d6553f;color:#fff;font-weight:bold;cursor:pointer">← Retour éditeur</button>
 </div>
 <div id="toast"></div>
@@ -847,6 +848,7 @@ function togglePlay(on) {
     const road = findRunRoad();
     if (!road) { toast('🛣️ Construis une route d\'abord (le perso court dessus) !', 3500); abort(); return; }
     runAxis = road.axis; runFixed = road.fixed * T; runStart = road.a * T - T / 2 + 4; runEnd = road.b * T + T / 2; runP = runStart; runLane = 0; runY = 0; runVY = 0;
+    camYaw = 0; camPitch = 0;   // caméra derrière le perso au démarrage
     hero.visible = true;
   } else { if (hero) hero.visible = false; ctr = cam === cam3 ? ctr3 : ctr2; if (cam === cam3) ctr3.enabled = true; }
 }
@@ -858,7 +860,15 @@ addEventListener('keydown', (e) => {   // RUNNER : ← → = changer de voie, Es
   if (k === 'q' || k === 'a' || k === 'arrowleft') runLane = Math.max(-1, runLane - 1);
   else if (k === 'd' || k === 'arrowright') runLane = Math.min(1, runLane + 1);
   else if (k === ' ' || k === 'arrowup' || k === 'z' || k === 'w') { if (runY <= 0.02) runVY = JUMP_V; }
+  else if (k === 'c') { camYaw = 0; camPitch = 0; }   // recentrer la caméra derrière le perso
 });
+// caméra libre en mode Jeu (glisser la souris) → permet de regarder les montagnes de côté et voir la parallaxe sans casque
+let camYaw = 0, camPitch = 0, camDrag = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { if (!playMode) return; camDrag = { x: e.clientX, y: e.clientY }; try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {} });
+renderer.domElement.addEventListener('pointermove', (e) => { if (!playMode || !camDrag) return; camYaw += (e.clientX - camDrag.x) * 0.006; camPitch = Math.max(-0.25, Math.min(1.05, camPitch + (e.clientY - camDrag.y) * 0.005)); camDrag.x = e.clientX; camDrag.y = e.clientY; });
+const _camEnd = (e) => { if (!camDrag) return; camDrag = null; try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (_) {} };
+renderer.domElement.addEventListener('pointerup', _camEnd);
+renderer.domElement.addEventListener('pointercancel', _camEnd);
 
 // hook de test (inoffensif)
 window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); }, togglePlay,
@@ -875,8 +885,8 @@ renderer.setAnimationLoop((t) => {
   if (blimp) {   // le dirigeable orbite au-dessus de la ville + léger tangage
     blimpA += dt * 0.06;
     const rad = Math.min(72, Math.max(30, bgExt * 0.5));
-    blimp.position.set(bgGroup.position.x + Math.cos(blimpA) * rad, 44 + Math.sin(blimpA * 3) * 1.6, bgGroup.position.z + Math.sin(blimpA) * rad);
-    blimp.rotation.y = -blimpA + Math.PI / 2;   // nez orienté dans le sens de la marche
+    blimp.position.set(bgGroup.position.x + Math.cos(blimpA) * rad, 44 + Math.sin(blimpA * 3) * 1.6, bgGroup.position.z - Math.sin(blimpA) * rad);
+    blimp.rotation.y = blimpA - Math.PI / 2;   // nez dans le sens de la marche ET flanc (logo) tourné vers le centre → toujours visible
   }
   for (const tr of trains) { tr.p += tr.speed * dt; if (tr.p > tr.max + tr.len) tr.p = tr.min; if (tr.axis === 'x') tr.group.position.x = tr.p; else tr.group.position.z = tr.p; }   // le train roule le long de sa voie (X ou Z) et boucle
   for (const bar of barriers) {   // barrière baissée si un train approche du passage
@@ -895,13 +905,13 @@ renderer.setAnimationLoop((t) => {
     if (runP > runEnd + 6) runP = runStart;                            // boucle (endless en attendant les obstacles)
     if (runVY !== 0 || runY > 0) { runVY -= GRAV * dt; runY += runVY * dt; if (runY <= 0) { runY = 0; runVY = 0; } }   // saut
     const cross = runFixed + runLane * LANE_W, lerp = Math.min(1, dt * 14);
-    if (runAxis === 'x') {
-      hero.position.x = runP; hero.position.z += (cross - hero.position.z) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = Math.PI / 2;
-      cam3.position.set(runP - 9, heroFoot + 5.5 + runY * 0.4, hero.position.z); cam3.lookAt(runP + 6, heroFoot + 1.6 + runY * 0.4, hero.position.z);
-    } else {
-      hero.position.z = runP; hero.position.x += (cross - hero.position.x) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = 0;
-      cam3.position.set(hero.position.x, heroFoot + 5.5 + runY * 0.4, runP - 9); cam3.lookAt(hero.position.x, heroFoot + 1.6 + runY * 0.4, runP + 6);
-    }
+    if (runAxis === 'x') { hero.position.x = runP; hero.position.z += (cross - hero.position.z) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = Math.PI / 2; }
+    else { hero.position.z = runP; hero.position.x += (cross - hero.position.x) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = 0; }
+    // caméra : par défaut derrière le perso, orbitable à la souris (camYaw) + hauteur (camPitch) → regarder les montagnes en courant
+    const theta0 = runAxis === 'x' ? Math.PI : -Math.PI / 2;   // direction « derrière » selon l'axe de course
+    const th = theta0 + camYaw, D = 9, eyeY = heroFoot + 1.6 + runY * 0.4;
+    cam3.position.set(hero.position.x + Math.cos(th) * D, eyeY + 3.9 + camPitch * 7, hero.position.z + Math.sin(th) * D);
+    cam3.lookAt(hero.position.x, eyeY, hero.position.z);
     if (heroMix) heroMix.update(dt);
   } else ctr.update();
   renderer.render(scene, cam);
