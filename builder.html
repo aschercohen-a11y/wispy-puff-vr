@@ -267,6 +267,7 @@ const BUILDINGS = {   // grands bâtiments Meshy (optimisés : ~50k tris, ~1 MB)
   immorange: { label: '🏢 Immeuble orange',    file: 'immeuble_orange', foot: 12 },
   brasserie: { label: '☕ Brasserie café',     file: 'brasserie', foot: 13 },
   biblio:    { label: '📚 Bibliothèque',       file: 'bibliotheque', foot: 13 },
+  granderoue:{ label: '🎡 Grande roue',        file: 'wheel', foot: 16, custom: true },
 };
 const OBJ_ASSET = {};   // assets de la couche OBJETS : maisons GLB + immeubles + déco procédurale
 function unlit(root) { root.traverse(m => { if (!m.isMesh || !m.material) return; const conv = (s) => { if (s.map) s.map.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshBasicMaterial({ map: s.map || null, color: s.map ? 0xffffff : (s.color ? s.color.clone() : new THREE.Color(0xffffff)), side: THREE.DoubleSide, transparent: !!s.transparent, opacity: s.opacity != null ? s.opacity : 1 }); }; m.material = Array.isArray(m.material) ? m.material.map(conv) : conv(m.material); }); }
@@ -296,7 +297,31 @@ function buildAllee() {   // petit chemin pavé + 2 piliers + haies (mène de la
 const DECO = { allee: { label: '🚪 Allée / entrée' } };
 OBJ_ASSET.allee = buildAllee();
 const gltf = new GLTFLoader();
-for (const src of [HOUSES, BUILDINGS]) for (const k in src) { const h = src[k]; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); OBJ_ASSET[k] = fitObject(g.scene, h.foot || 9); if (k === 'lac') { const root = OBJ_ASSET[k].children[0]; root.scale.y *= 0.65; root.position.y = 0; root.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(root); root.position.y = -bb.min.y; addLakeWater(OBJ_ASSET[k]); } const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) { btn.disabled = false; btn.textContent = h.label; } placeReady(); }); }
+for (const src of [HOUSES, BUILDINGS]) for (const k in src) { const h = src[k]; if (h.custom) continue; gltf.load('models/' + h.file + '.glb', (g) => { unlit(g.scene); OBJ_ASSET[k] = fitObject(g.scene, h.foot || 9); if (k === 'lac') { const root = OBJ_ASSET[k].children[0]; root.scale.y *= 0.65; root.position.y = 0; root.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(root); root.position.y = -bb.min.y; addLakeWater(OBJ_ASSET[k]); } const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) { btn.disabled = false; btn.textContent = h.label; } placeReady(); }); }
+// GRANDE ROUE : pied Meshy + roue Meshy (redressée) + rotation animée. Roue centrée ENTRE les montants du pied.
+(function () {
+  const gl = new GLTFLoader();
+  Promise.all([
+    new Promise(r => gl.load('models/wsupport.glb', g => r(g.scene))),
+    new Promise(r => gl.load('models/wheel.glb', g => r(g.scene))),
+  ]).then(([sup, whl]) => {
+    unlit(sup); unlit(whl);
+    const A = 8;   // hauteur de l'axe
+    sup.updateMatrixWorld(true); let sb = new THREE.Box3().setFromObject(sup);
+    sup.scale.setScalar(A / ((sb.max.y - sb.min.y) || 1)); sup.updateMatrixWorld(true); sb = new THREE.Box3().setFromObject(sup);
+    sup.position.y -= sb.min.y; sup.position.x -= (sb.min.x + sb.max.x) / 2; sup.position.z -= (sb.min.z + sb.max.z) / 2;   // pied au sol, centré
+    whl.rotation.x = -Math.PI / 2;   // roue à plat → verticale
+    whl.updateMatrixWorld(true); let wb = new THREE.Box3().setFromObject(whl);
+    const R = Math.max(wb.max.x - wb.min.x, wb.max.y - wb.min.y) / 2 || 1;
+    whl.scale.setScalar(A / R); whl.updateMatrixWorld(true); wb = new THREE.Box3().setFromObject(whl);
+    whl.position.x -= (wb.min.x + wb.max.x) / 2; whl.position.y -= (wb.min.y + wb.max.y) / 2; whl.position.z -= (wb.min.z + wb.max.z) / 2;   // roue centrée sur l'origine
+    const pivot = new THREE.Group(); pivot.position.set(0, A, 0); pivot.userData.ferris = true; pivot.add(whl);   // pivot à l'axe, roue au centre (entre les montants)
+    const ride = new THREE.Group(); ride.add(sup); ride.add(pivot);
+    OBJ_ASSET.granderoue = ride;
+    const btn = document.querySelector('button[data-t="granderoue"]'); if (btn) { btn.disabled = false; btn.textContent = BUILDINGS.granderoue.label; }
+    placeReady();
+  });
+})();
 // Rail Meshy (modèle) : tuile async, 3 segments par case pour tuiler sur 14
 gltf.load('models/rail_meshy.glb', (g) => {
   unlit(g.scene); const source = g.scene; source.updateMatrixWorld(true);
@@ -350,6 +375,7 @@ function addObject(type, gx, gz, ox, oz, rot, meta) {   // pose 1 objet précis 
   const rec = { id, type, gx, gz, ox, oz, rot, mesh, sc, dy, pid: meta && meta.pid, axis: meta && meta.axis, side: meta && meta.side };
   objects.set(id, rec);
   if (type === 'lac') { rec.waterMeshes = []; mesh.traverse(o => { if (o.userData.lakeWater) rec.waterMeshes.push({ m: o, baseY: o.position.y }); }); rec.waterDy = (meta && meta.waterDy) || 0; rec.waterScale = (meta && meta.waterScale) || 1; applyLakeWater(rec); }
+  if (type === 'granderoue') { rec.ferris = []; mesh.traverse(o => { if (o.userData.ferris) rec.ferris.push(o); }); }
 }
 function snap(v) { return Math.round(v / 0.5) * 0.5; }   // grille fine 0.5 pour aligner/espacer précisément
 function applyLakeWater(rec) { if (!rec.waterMeshes) return; const s = rec.waterScale || 1; for (const w of rec.waterMeshes) { w.m.scale.set(s, s, 1); w.m.position.y = w.baseY + (rec.waterDy || 0); } }
@@ -730,6 +756,7 @@ let _lt = 0;
 renderer.setAnimationLoop((t) => {
   const dt = _lt ? Math.min(0.05, (t - _lt) / 1000) : 0.016; _lt = t;
   LAKE_RIPPLE.offset.x += dt * 0.03; LAKE_RIPPLE.offset.y += dt * 0.022;   // ondulations de l'eau des lacs
+  for (const e of objects.values()) if (e.ferris) for (const p of e.ferris) p.rotation.z += dt * 0.35;   // grande roue qui tourne
   for (const tr of trains) { tr.p += tr.speed * dt; if (tr.p > tr.max + tr.len) tr.p = tr.min; if (tr.axis === 'x') tr.group.position.x = tr.p; else tr.group.position.z = tr.p; }   // le train roule le long de sa voie (X ou Z) et boucle
   for (const bar of barriers) {   // barrière baissée si un train approche du passage
     let near = false;
