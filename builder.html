@@ -557,11 +557,28 @@ function refresh() { document.getElementById('count').textContent = grid.size + 
 
 // ---------- Décor de fond : collines cartoon à l'horizon (comble les bords vides) ----------
 const bgGroup = new THREE.Group(); scene.add(bgGroup);
-let hillsOn = true, bgSig = '';
-const MT_CONE = new THREE.ConeGeometry(1, 1, 6);   // cône unité (base en bas, sommet en haut) → montagne facettée cartoon
-const SHARED_GEO = new Set([MT_CONE]);
-function hillMat(c) { return new THREE.MeshBasicMaterial({ color: c }); }   // unlit + fog auto → les montagnes lointaines se fondent dans le ciel
-function clearBg() { while (bgGroup.children.length) { const m = bgGroup.children.pop(); if (m.geometry && !SHARED_GEO.has(m.geometry)) m.geometry.dispose(); if (m.material) m.material.dispose(); } }
+let hillsOn = true, bgSig = '', bgExt = 14;
+const MT_CONE = new THREE.ConeGeometry(1, 1, 6);   // cône unité (fallback si les modèles ne sont pas encore chargés)
+const SHARED = new Set([MT_CONE]);   // géométries + matériaux partagés (templates montagnes) → ne jamais disposer
+function hillMat(c) { return new THREE.MeshBasicMaterial({ color: c }); }   // unlit + fog auto → le lointain se fond dans le ciel
+function clearBg() { while (bgGroup.children.length) { const m = bgGroup.children.pop(); if (m.geometry && !SHARED.has(m.geometry)) m.geometry.dispose(); if (m.material && !SHARED.has(m.material)) m.material.dispose(); } }
+// modèles de montagnes Meshy (chargés une fois, clonés tout autour de la ville)
+const MT = {}; let mtReady = false;
+for (const nm of ['montagne1', 'montagne2']) {
+  new GLTFLoader().load('models/' + nm + '.glb', (g) => {
+    const root = g.scene; unlit(root);
+    root.traverse(o => { if (o.isMesh) { SHARED.add(o.geometry); (Array.isArray(o.material) ? o.material : [o.material]).forEach(mm => SHARED.add(mm)); } });
+    const box = new THREE.Box3().setFromObject(root); const sz = new THREE.Vector3(); box.getSize(sz);
+    MT[nm] = { scene: root, h: sz.y || 1, minY: box.min.y };
+    mtReady = true; bgSig = ''; buildBg();   // reconstruit l'anneau avec les vraies montagnes
+  });
+}
+function placeMountain(nm, x, z, H, rotY) {
+  const t = MT[nm]; if (!t) return;
+  const c = t.scene.clone(true); const s = H / t.h;
+  c.scale.setScalar(s); c.position.set(x, -t.minY * s - 2, z); c.rotation.y = rotY;   // base posée au sol, légèrement enfoncée
+  bgGroup.add(c);
+}
 function makeMountain(x, z, rock, snow, R, H, rotY) {
   const zf = 0.8 + Math.random() * 0.4;   // légère irrégularité de base (même pour roche + neige → cime alignée)
   // masse rocheuse
@@ -587,38 +604,35 @@ function buildBg() {
   const ext = Math.max(maxX - minX, maxZ - minZ) / 2 + T;   // demi-taille + une tuile de marge
   const sig = Math.round(cx / 7) + '|' + Math.round(cz / 7) + '|' + Math.round(ext / 7);
   if (sig === bgSig) return;   // rien de neuf → on ne reconstruit pas
-  bgSig = sig; clearBg();
+  bgSig = sig; clearBg(); bgExt = ext;
   bgGroup.position.set(cx, 0, cz);
   const R = ext + 34;
   // grand sol vert circulaire → supprime le vide bleu quadrillé autour de la ville
   const ground = new THREE.Mesh(new THREE.CircleGeometry(Math.max(R + 190, 380), 64), hillMat(0x86c76a));
   ground.rotation.x = -Math.PI / 2; ground.position.y = -0.06; bgGroup.add(ground);
-  // petites collines vertes juste au pied (transition douce ville → montagnes)
-  const foot = [
-    { r: R - 10, col: 0x7cbf5e, n: 22, h: [5, 10], s: [8, 13] },
-    { r: R - 2, col: 0x8fce6b, n: 18, h: [7, 13], s: [10, 15] },
-  ];
-  for (const rg of foot) {
-    for (let i = 0; i < rg.n; i++) {
-      const a = (i / rg.n) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
-      const rr = rg.r + (Math.random() - 0.5) * 14;
-      const sx = rg.s[0] + Math.random() * (rg.s[1] - rg.s[0]);
-      const hy = rg.h[0] + Math.random() * (rg.h[1] - rg.h[0]);
-      const m = new THREE.Mesh(MT_CONE, hillMat(rg.col));   // colline = cône très écrasé et large
-      m.position.set(Math.cos(a) * rr, hy / 2 - 3, Math.sin(a) * rr);
-      m.scale.set(sx * 1.6, hy, sx * 1.6 * (0.8 + Math.random() * 0.4));
-      m.rotation.y = Math.random() * Math.PI;
-      bgGroup.add(m);
+  if (mtReady) {
+    // vraies montagnes Meshy à glaciers, en 2 anneaux (le lointain bleuté par le brouillard)
+    const N1 = 13;
+    for (let i = 0; i < N1; i++) {
+      const a = (i / N1) * Math.PI * 2 + (Math.random() - 0.5) * 0.20;
+      const rr = R + 20 + (Math.random() - 0.5) * 20;
+      const H = 40 + Math.random() * 22;
+      placeMountain(i % 2 ? 'montagne2' : 'montagne1', Math.cos(a) * rr, Math.sin(a) * rr, H, Math.random() * Math.PI * 2);
     }
-  }
-  // 3 chaînes de montagnes à glaciers, de plus en plus hautes + bleutées (profondeur atmosphérique)
-  const ranges = [
-    { r: R + 22, rock: 0x7f8792, snow: 0xffffff, n: 20, h: [26, 46], s: [12, 20] },
-    { r: R + 58, rock: 0x93a0b6, snow: 0xf3f8ff, n: 18, h: [36, 60], s: [16, 26] },
-    { r: R + 102, rock: 0xb2c0d8, snow: 0xffffff, n: 16, h: [48, 76], s: [20, 32] },
-  ];
-  for (const rg of ranges) {
-    for (let i = 0; i < rg.n; i++) {
+    const N2 = 11;
+    for (let i = 0; i < N2; i++) {
+      const a = ((i + 0.5) / N2) * Math.PI * 2 + (Math.random() - 0.5) * 0.20;
+      const rr = R + 70 + (Math.random() - 0.5) * 26;
+      const H = 56 + Math.random() * 28;
+      placeMountain(i % 2 ? 'montagne1' : 'montagne2', Math.cos(a) * rr, Math.sin(a) * rr, H, Math.random() * Math.PI * 2);
+    }
+  } else {
+    // fallback tant que les modèles ne sont pas chargés : cônes codés
+    const ranges = [
+      { r: R + 22, rock: 0x7f8792, snow: 0xffffff, n: 16, h: [26, 46], s: [12, 20] },
+      { r: R + 70, rock: 0x9aa7bd, snow: 0xffffff, n: 14, h: [40, 70], s: [16, 28] },
+    ];
+    for (const rg of ranges) for (let i = 0; i < rg.n; i++) {
       const a = (i / rg.n) * Math.PI * 2 + (Math.random() - 0.5) * 0.16;
       const rr = rg.r + (Math.random() - 0.5) * 22;
       const sx = rg.s[0] + Math.random() * (rg.s[1] - rg.s[0]);
@@ -629,6 +643,16 @@ function buildBg() {
 }
 document.getElementById('hills').onclick = () => { hillsOn = !hillsOn; const b = document.getElementById('hills'); b.style.background = hillsOn ? '#7cbf5e' : ''; b.style.color = hillsOn ? '#023' : '#fff'; bgSig = ''; buildBg(); };
 document.getElementById('hills').style.background = '#7cbf5e'; document.getElementById('hills').style.color = '#023';
+
+// ---------- Dirigeable pub « BURGO » qui orbite lentement au-dessus de la ville ----------
+let blimp = null, blimpA = 0;
+new GLTFLoader().load('models/dirigeable.glb', (g) => {
+  const root = g.scene; unlit(root);
+  const box = new THREE.Box3().setFromObject(root); const sz = new THREE.Vector3(); box.getSize(sz);
+  const s = 30 / Math.max(sz.x, sz.y, sz.z); root.scale.setScalar(s);
+  const c = new THREE.Vector3(); box.getCenter(c); root.position.set(-c.x * s, -c.y * s, -c.z * s);   // pivot au centre du ballon
+  blimp = new THREE.Group(); blimp.add(root); scene.add(blimp);
+});
 
 highlight(); refresh();
 
@@ -837,7 +861,7 @@ addEventListener('keydown', (e) => {   // RUNNER : ← → = changer de voie, Es
 window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); }, togglePlay,
   placeHalfXZ: (x, z, type, rot) => { const sx = Math.round(x / HG) * HG, sz = Math.round(z / HG) * HG, k = sx + '_' + sz; const m = ASSET[type].clone(true); m.position.set(sx, 0, sz); m.rotation.y = (rot || 0) * Math.PI / 2; worldGroup.add(m); halfTiles.set(k, { type, x: sx, z: sz, rot: rot || 0, mesh: m }); },
   barrierInfo: () => ({ armLoaded: !!BARRIER_ARM, count: barriers.length, sample: barriers[0] ? { px: barriers[0].px, pz: barriers[0].pz, angle: +barriers[0].angle.toFixed(2), gpos: barriers[0].group.position.toArray().map(v => +v.toFixed(1)) } : null }),
-  clearSilent: () => { clearAllSilent(); scheduleTrains(); refresh(); } };
+  clearSilent: () => { clearAllSilent(); scheduleTrains(); refresh(); }, scene, getBlimp: () => blimp };
 
 // ---------- Boucle ----------
 let _lt = 0;
@@ -845,6 +869,12 @@ renderer.setAnimationLoop((t) => {
   const dt = _lt ? Math.min(0.05, (t - _lt) / 1000) : 0.016; _lt = t;
   LAKE_RIPPLE.offset.x += dt * 0.03; LAKE_RIPPLE.offset.y += dt * 0.022;   // ondulations de l'eau des lacs
   for (const e of objects.values()) if (e.ferris) for (const p of e.ferris) p.rotation.z += dt * 0.35;   // grande roue qui tourne
+  if (blimp) {   // le dirigeable orbite au-dessus de la ville + léger tangage
+    blimpA += dt * 0.06;
+    const rad = Math.min(72, Math.max(30, bgExt * 0.5));
+    blimp.position.set(bgGroup.position.x + Math.cos(blimpA) * rad, 44 + Math.sin(blimpA * 3) * 1.6, bgGroup.position.z + Math.sin(blimpA) * rad);
+    blimp.rotation.y = -blimpA + Math.PI / 2;   // nez orienté dans le sens de la marche
+  }
   for (const tr of trains) { tr.p += tr.speed * dt; if (tr.p > tr.max + tr.len) tr.p = tr.min; if (tr.axis === 'x') tr.group.position.x = tr.p; else tr.group.position.z = tr.p; }   // le train roule le long de sa voie (X ou Z) et boucle
   for (const bar of barriers) {   // barrière baissée si un train approche du passage
     let near = false;
