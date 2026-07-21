@@ -65,6 +65,7 @@
     <div class="row2"><button id="erase" class="act" style="flex:1">🧹 Gomme</button><button id="clear" class="warn" style="flex:1">🗑️ Vider</button></div>
     <button id="view" class="act">🗺️ Vue 2D (plan)</button>
     <button id="fit" class="act">🔭 Voir tout</button>
+    <button id="hills" class="act">⛰️ Collines (fond)</button>
     <button id="play" class="act" style="background:#3fbf5a;color:#fff;font-size:14px">🎮 Jouer dans mon monde</button>
   </div>
   <div class="grp">
@@ -552,7 +553,57 @@ document.getElementById('fit').onclick = () => {   // recadre la caméra sur TOU
   else { cam2.position.set(c.x, 200, c.z); cam2.zoom = Math.min(cam2.right * 2 / (sz.x + 20), (cam2.top * 2) / (sz.z + 20)); cam2.updateProjectionMatrix(); ctr2.target.set(c.x, 0, c.z); ctr2.update(); }
 };
 document.getElementById('save').onclick = () => saveNow(true);
-function refresh() { document.getElementById('count').textContent = grid.size + objects.size + halfTiles.size; }
+function refresh() { document.getElementById('count').textContent = grid.size + objects.size + halfTiles.size; buildBg(); }
+
+// ---------- Décor de fond : collines cartoon à l'horizon (comble les bords vides) ----------
+const bgGroup = new THREE.Group(); scene.add(bgGroup);
+let hillsOn = true, bgSig = '';
+const HILL_DOME = new THREE.SphereGeometry(1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);   // demi-sphère = colline arrondie
+function hillMat(c) { return new THREE.MeshBasicMaterial({ color: c }); }   // unlit + fog auto → les collines lointaines se fondent dans le ciel
+function clearBg() { while (bgGroup.children.length) { const m = bgGroup.children.pop(); if (m.geometry && m.geometry !== HILL_DOME) m.geometry.dispose(); if (m.material) m.material.dispose(); } }
+function buildBg() {
+  if (!hillsOn) { clearBg(); bgSig = ''; return; }
+  // bbox monde de tout ce qui est posé
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, has = false;
+  const acc = (x, z) => { has = true; if (x < minX) minX = x; if (x > maxX) maxX = x; if (z < minZ) minZ = z; if (z > maxZ) maxZ = z; };
+  for (const k of grid.keys()) { const [gx, gz] = k.split('_').map(Number); acc(gx * T, gz * T); }
+  for (const e of objects.values()) acc(e.gx * T + (e.ox || 0), e.gz * T + (e.oz || 0));
+  for (const k of halfTiles.keys()) { const [x, z] = k.split('_').map(Number); acc(x, z); }
+  if (!has) { minX = minZ = -T; maxX = maxZ = T; }
+  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+  const ext = Math.max(maxX - minX, maxZ - minZ) / 2 + T;   // demi-taille + une tuile de marge
+  const sig = Math.round(cx / 7) + '|' + Math.round(cz / 7) + '|' + Math.round(ext / 7);
+  if (sig === bgSig) return;   // rien de neuf → on ne reconstruit pas
+  bgSig = sig; clearBg();
+  bgGroup.position.set(cx, 0, cz);
+  const R = ext + 34;
+  // grand sol vert circulaire → supprime le vide bleu quadrillé autour de la ville
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(Math.max(R + 120, 330), 64), hillMat(0x86c76a));
+  ground.rotation.x = -Math.PI / 2; ground.position.y = -0.06; bgGroup.add(ground);
+  // 3 anneaux de collines, de plus en plus bleutés/hauts avec la distance (profondeur)
+  const rings = [
+    { r: R, col: 0x7cbf5e, n: 28, h: [6, 12], s: [7, 12] },
+    { r: R + 28, col: 0x93c78a, n: 24, h: [9, 17], s: [10, 16] },
+    { r: R + 64, col: 0xadd0c6, n: 20, h: [13, 23], s: [14, 22] },
+  ];
+  for (const rg of rings) {
+    for (let i = 0; i < rg.n; i++) {
+      const a = (i / rg.n) * Math.PI * 2 + (Math.random() - 0.5) * 0.13;
+      const rr = rg.r + (Math.random() - 0.5) * 16;
+      const sx = rg.s[0] + Math.random() * (rg.s[1] - rg.s[0]);
+      const hy = rg.h[0] + Math.random() * (rg.h[1] - rg.h[0]);
+      const m = new THREE.Mesh(HILL_DOME, hillMat(rg.col));
+      m.position.set(cx + Math.cos(a) * rr, -1.2, cz + Math.sin(a) * rr);   // base enfoncée → pas de bord plat visible
+      m.scale.set(sx, hy, sx * (0.8 + Math.random() * 0.5));
+      m.rotation.y = Math.random() * Math.PI;
+      m.position.sub(bgGroup.position);   // exprimé dans le repère du groupe (centré ville)
+      bgGroup.add(m);
+    }
+  }
+}
+document.getElementById('hills').onclick = () => { hillsOn = !hillsOn; const b = document.getElementById('hills'); b.style.background = hillsOn ? '#7cbf5e' : ''; b.style.color = hillsOn ? '#023' : '#fff'; bgSig = ''; buildBg(); };
+document.getElementById('hills').style.background = '#7cbf5e'; document.getElementById('hills').style.color = '#023';
+
 highlight(); refresh();
 
 function toast(msg, dur) { const t = document.getElementById('toast'); t.textContent = msg; t.style.opacity = 1; setTimeout(() => t.style.opacity = 0, dur || 1600); }
