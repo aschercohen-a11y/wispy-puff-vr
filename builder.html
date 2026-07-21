@@ -97,7 +97,7 @@ scene.fog = new THREE.Fog(0xbfe0f6, 210, 680);   // portée étendue → les cha
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.xr.enabled = true;   // WebXR : runner jouable en VR sur le casque
-try { renderer.xr.setFramebufferScaleFactor(1.3); } catch (e) {}   // suréchantillonnage → images plus nettes dans le casque
+try { renderer.xr.setFramebufferScaleFactor(1.0); } catch (e) {}   // résolution native → priorité à la fluidité (l'antialiasing MSAA gère les bords)
 document.body.appendChild(renderer.domElement);
 const vrBtn = VRButton.createButton(renderer); vrBtn.style.zIndex = 70; document.body.appendChild(vrBtn);   // bouton « Enter VR » (visible sur le Quest)
 const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();   // filtrage anisotrope max → textures nettes même de biais (rue qui fuit)
@@ -967,12 +967,13 @@ renderer.xr.addEventListener('sessionstart', () => {
   runAxis = road.axis; runFixed = road.fixed * T; runStart = road.a * T - T / 2 + 4; runEnd = road.b * T + T / 2;
   runP = runStart; runLane = 0; runY = 0; runVY = 0;
   dolly.add(cam3); ctr3.enabled = false; vignette.visible = true; if (hero) hero.visible = true;   // 3e personne : on suit le perso
-  try { renderer.xr.setFoveation(0); } catch (e) {}   // coupe le flou périphérique du Quest → net même en regardant sur les côtés
+  try { renderer.xr.setFoveation(0.4); } catch (e) {}   // flou périphérique modéré → gros gain de perf (fluidité) avec peu de perte au centre
   vrReady = true;
 });
 renderer.xr.addEventListener('sessionend', () => {
   vrReady = false; dolly.remove(cam3); dolly.position.set(0, 0, 0); dolly.rotation.set(0, 0, 0);
   ctr3.enabled = (cam === cam3); vignette.visible = false;
+  for (const e of objects.values()) e.mesh.visible = true;   // ré-affiche tout ce que le culling avait masqué
 });
 function readVRInput() {
   const session = renderer.xr.getSession(); if (!session) return;
@@ -986,6 +987,8 @@ function readVRInput() {
   if (!jump) jumpReady = true; else if (jumpReady && runY <= 0.02) { runVY = JUMP_V; jumpReady = false; }
 }
 const VR_BACK = 6, VR_UP = 1.5;   // caméra : recul derrière le perso + élévation (vue « Subway » un peu plongeante)
+const CULL_DIST2 = 115 * 115;   // objets à plus de ~115 unités du joueur = masqués (gros gain de perf sur une grande ville)
+function cullRunner(px, pz) { for (const e of objects.values()) { const dx = e.mesh.position.x - px, dz = e.mesh.position.z - pz; e.mesh.visible = (dx * dx + dz * dz) < CULL_DIST2; } }
 function updateVRRunner(dt) {
   if (!vrReady) return;
   readVRInput();
@@ -1002,6 +1005,7 @@ function updateVRRunner(dt) {
     dolly.position.set(hx, runY + VR_UP, runP - VR_BACK); dolly.rotation.y = Math.PI;   // rig derrière le perso, face à +z
   }
   if (hero && heroMix) heroMix.update(dt);
+  cullRunner(dolly.position.x, dolly.position.z);   // masque les objets lointains → fluidité
 }
 
 // hook de test (inoffensif)
