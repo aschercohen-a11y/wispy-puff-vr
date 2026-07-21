@@ -374,3 +374,17 @@ Ne pas dessiner ce qui est **caché derrière** un autre objet (immeuble derriè
 - **DRACO/meshopt** : compresse le FICHIER (téléchargement) mais PAS le coût d'affichage (triangles) → utile pour le download, pas pour le framerate.
 
 **Ordre conseillé** : (a) modèles légers "medium" à la génération → (b) distance culling → (c) instancing → (d) LOD → (e) occlusion si vraiment nécessaire.
+
+---
+
+# 🎮 GAMEPLAY DÉCIDÉ (2026-07-21)
+
+**Le genre = Subway Surfers** (runner auto), PAS de la balade libre. Le "mode Jeu" actuel du builder (ZQSD libre) est à **remplacer** par le runner.
+
+- **Le builder construit le décor/niveau** ; **le jeu = le perso court tout seul** sur 3 voies et esquive les obstacles (voitures/trains/barrières posés).
+- On avait déjà le runner dans `surf.html` (course infinie, 3 voies, monde qui défile, monte sur les bus) → **à rebrancher sur la carte du builder.**
+
+**Niveau 1 = OPTION A** : piste **droite**, le perso court tout droit, le décor autour défile (Subway Surfers pur). La route de la carte doit rester droite.
+**Plus tard (autres niveaux) = OPTION B** : le perso **suit la route construite** (tourne aux virages/carrefours). Le builder étant modulaire, ça s'ajoutera.
+
+**À planifier demain** : remplacer mode balade → runner A ; obstacles (voitures/trains/barrières deadly) ; objectif du niveau ; comment le builder (piste droite) alimente le runner.
