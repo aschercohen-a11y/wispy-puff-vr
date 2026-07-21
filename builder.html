@@ -84,6 +84,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/controls/OrbitControls.js';
 import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
+import { VRButton } from './vendor/VRButton.js';
 
 const SB_URL = 'https://supabase-api.swipego.app';
 const SB_ANON = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc3MTI3NDIyMCwiZXhwIjo0OTI2OTQ3ODIwLCJyb2xlIjoiYW5vbiJ9.4c5wruvy-jj3M8fSjhmgR4FvdF6za-mgawlkB_B0uB0';
@@ -95,7 +96,9 @@ scene.background = new THREE.Color(0xbfe0f6);
 scene.fog = new THREE.Fog(0xbfe0f6, 210, 680);   // portée étendue → les chaînes de montagnes lointaines restent visibles (profondeur)
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.xr.enabled = true;   // WebXR : runner jouable en VR sur le casque
 document.body.appendChild(renderer.domElement);
+const vrBtn = VRButton.createButton(renderer); vrBtn.style.zIndex = 70; document.body.appendChild(vrBtn);   // bouton « Enter VR » (visible sur le Quest)
 const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();   // filtrage anisotrope max → textures nettes même de biais (rue qui fuit)
 function sharpTex(t) { if (t) { t.anisotropy = MAX_ANISO; t.needsUpdate = true; } return t; }
 
@@ -945,6 +948,51 @@ const _camEnd = (e) => { if (!camDrag) return; camDrag = null; try { renderer.do
 renderer.domElement.addEventListener('pointerup', _camEnd);
 renderer.domElement.addEventListener('pointercancel', _camEnd);
 
+// ---------- RUNNER VR (casque Quest) : on court en immersion, la ville défile ----------
+const dolly = new THREE.Group(); scene.add(dolly);   // rig du joueur : on le déplace, le casque ajoute la vue de la tête
+// vignette de confort (tunnel) attachée à la tête → réduit le mal de mer pendant la course
+const vignette = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
+  const g = x.createRadialGradient(128, 128, 66, 128, 128, 132); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.9)');
+  x.fillStyle = g; x.fillRect(0, 0, 256, 256);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false, depthWrite: false }));
+  m.position.z = -1; m.renderOrder = 999; m.frustumCulled = false; m.visible = false; return m;
+})();
+cam3.add(vignette);
+let vrReady = false, laneReady = true, jumpReady = true;
+renderer.xr.addEventListener('sessionstart', () => {
+  const road = findRunRoad();
+  if (!road) { toast('🛣️ Construis une route d\'abord !'); vrReady = false; return; }
+  runAxis = road.axis; runFixed = road.fixed * T; runStart = road.a * T - T / 2 + 4; runEnd = road.b * T + T / 2;
+  runP = runStart; runLane = 0; runY = 0; runVY = 0;
+  dolly.add(cam3); ctr3.enabled = false; vignette.visible = true; if (hero) hero.visible = false;   // 1re personne : on EST le coureur
+  vrReady = true;
+});
+renderer.xr.addEventListener('sessionend', () => {
+  vrReady = false; dolly.remove(cam3); dolly.position.set(0, 0, 0); dolly.rotation.set(0, 0, 0);
+  ctr3.enabled = (cam === cam3); vignette.visible = false;
+});
+function readVRInput() {
+  const session = renderer.xr.getSession(); if (!session) return;
+  let ax = 0, jump = false;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad; if (!gp) continue;
+    if (gp.axes.length >= 4) ax += gp.axes[2] || 0; if (gp.axes.length >= 2) ax += gp.axes[0] || 0;   // joystick horizontal (selon la manette)
+    for (let bi = 0; bi < gp.buttons.length; bi++) if ((bi === 0 || bi === 4 || bi === 5) && gp.buttons[bi].pressed) jump = true;   // gâchette ou boutons A/B → sauter
+  }
+  if (Math.abs(ax) < 0.35) laneReady = true; else if (laneReady) { runLane = Math.max(-1, Math.min(1, runLane + (ax > 0 ? 1 : -1))); laneReady = false; }
+  if (!jump) jumpReady = true; else if (jumpReady && runY <= 0.02) { runVY = JUMP_V; jumpReady = false; }
+}
+function updateVRRunner(dt) {
+  if (!vrReady) return;
+  readVRInput();
+  runP += RUN_SPEED * dt; if (runP > runEnd + 6) runP = runStart;   // course auto + boucle
+  if (runVY !== 0 || runY > 0) { runVY -= GRAV * dt; runY += runVY * dt; if (runY <= 0) { runY = 0; runVY = 0; } }   // saut
+  const cross = runFixed + runLane * LANE_W;
+  if (runAxis === 'x') { dolly.position.set(runP, runY, cross); dolly.rotation.y = -Math.PI / 2; }   // face à +x
+  else { dolly.position.set(cross, runY, runP); dolly.rotation.y = Math.PI; }                        // face à +z
+}
+
 // hook de test (inoffensif)
 window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); }, togglePlay,
   placeHalfXZ: (x, z, type, rot) => { const sx = Math.round(x / HG) * HG, sz = Math.round(z / HG) * HG, k = sx + '_' + sz; const m = ASSET[type].clone(true); m.position.set(sx, 0, sz); m.rotation.y = (rot || 0) * Math.PI / 2; worldGroup.add(m); halfTiles.set(k, { type, x: sx, z: sz, rot: rot || 0, mesh: m }); },
@@ -975,7 +1023,9 @@ renderer.setAnimationLoop((t) => {
     bar.angle += (bar.target - bar.angle) * Math.min(1, dt * 3);
     bar.lift.rotation.z = bar.angle;
   }
-  if (playMode && hero) {
+  if (renderer.xr.isPresenting) {
+    updateVRRunner(dt);                                               // RUNNER VR (casque) : on déplace le rig joueur, le casque gère la vue
+  } else if (playMode && hero) {
     runP += RUN_SPEED * dt;                                            // course automatique vers l'avant
     if (runP > runEnd + 6) runP = runStart;                            // boucle (endless en attendant les obstacles)
     if (runVY !== 0 || runY > 0) { runVY -= GRAV * dt; runY += runVY * dt; if (runY <= 0) { runY = 0; runVY = 0; } }   // saut
