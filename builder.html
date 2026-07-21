@@ -160,6 +160,12 @@ function buildRouteHalf() {   // DEMI-ROUTE : 7 de long × 14 (même coupe que l
   for (const off of [-1, 1]) for (let x = -L / 2 + 1.25; x < L / 2; x += 2.5) g.add(plane(1.2, 0.16, LINE, 0.022, x, off));
   return g;
 }
+function buildPaving() {   // DALLE : sol pavé plein 14×14, MÊME trottoir/texture/hauteur que les routes (à poser sous une fontaine, faire une place...)
+  const g = new THREE.Group(); g.add(sidewalk(T, T, 0, 0)); return g;
+}
+function buildPavingHalf() {   // DEMI-DALLE 7×7
+  const g = new THREE.Group(); g.add(sidewalk(7, 7, 0, 0)); return g;
+}
 function buildPrairieHalf() {   // DEMI-PRAIRIE : carré 7×7
   const S = 7, g = new THREE.Group();
   const gr = plane(S, S, new THREE.MeshBasicMaterial({ map: GRASS_TEX.clone() }), 0.002); gr.material.map.repeat.set(2, 2); g.add(gr);
@@ -228,8 +234,10 @@ const TILES = {
   passage:   { label: '🚦 Passage à niveau', build: buildPassage },
   carrefour: { label: '➕ Carrefour',     build: buildCarrefour },
   prairie:   { label: '🌳 Prairie',       build: buildPrairie },
+  paving:    { label: '🧱 Dalle (sol pavé)', build: buildPaving },
   demi_route:{ label: '🛣️ Demi-route (7)', build: buildRouteHalf, half: true },
   demi_prairie:{ label: '🟩 Demi-prairie (7×7)', build: buildPrairieHalf, half: true },
+  demi_paving:{ label: '🧱 Demi-dalle (7×7)', build: buildPavingHalf, half: true },
   // virage/Té : à finaliser prochainement (buildVirage / buildTe prêts mais pas encore assez propres)
 };
 const ASSET = {};
