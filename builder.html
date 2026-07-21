@@ -72,7 +72,7 @@
     <button id="restore" class="act" style="background:#e0a53f;color:#023">↩️ Restaurer sauvegarde locale</button>
   </div>
 </div>
-<div id="hud">Posés : <b id="count">0</b> · clic gauche = poser · clic droit = effacer · molette = zoom · R = tourner</div>
+<div id="hud">Posés : <b id="count">0</b> · clic gauche = poser · clic droit = effacer · molette = zoom · R = tourner · <b>Ctrl+Z = annuler</b></div>
 <div id="playHud" style="display:none;position:fixed;top:10px;left:10px;z-index:60;background:rgba(12,22,42,.92);color:#dff;padding:10px 14px;border-radius:10px;font:13px sans-serif;border:2px solid #6fd">
   🏃 Le perso court tout seul ! <b>← →</b> (ou Q/D) = changer de voie · <b>Espace / ↑</b> = sauter<br>
   <button id="playExit" style="margin-top:8px;padding:8px 16px;border:0;border-radius:6px;background:#d6553f;color:#fff;font-weight:bold;cursor:pointer">← Retour éditeur</button>
@@ -445,7 +445,7 @@ let dragged = false, downXY = null;
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (playMode) return;
   downXY = { x: e.clientX, y: e.clientY }; dragged = false;
-  if (moveMode && e.button === 0) { const id = pickObject(e); if (id != null) { grabbed = objects.get(id); selObj = grabbed; ctr.enabled = false; updateSizeCtl(); } }   // attrape + sélectionne l'objet (bloque la caméra le temps du glissé)
+  if (moveMode && e.button === 0) { const id = pickObject(e); if (id != null) { pushUndo(); grabbed = objects.get(id); selObj = grabbed; ctr.enabled = false; updateSizeCtl(); } }   // attrape + sélectionne l'objet (bloque la caméra le temps du glissé)
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (playMode) return;   // mode Jeu (runner) : la souris ne fait rien, la caméra suit le perso
@@ -473,8 +473,9 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     if (grabbed) { grabbed = null; ctr.enabled = true; scheduleSave(); return; }   // fin du déplacement
     const c = cellUnder(e);
     if (!moveMode && !dragged && c) {
-      if (e.button === 2) { eraseAt(e, c.gx, c.gz); refresh(); scheduleSave(); }   // clic droit SANS glisser = supprimer l'objet/le bloc sous le curseur (2D et 3D)
+      if (e.button === 2) { pushUndo(); eraseAt(e, c.gx, c.gz); refresh(); scheduleSave(); }   // clic droit SANS glisser = supprimer l'objet/le bloc sous le curseur (2D et 3D)
       else if (e.button === 0 && (eraseMode || curType)) {
+        pushUndo();
         if (eraseMode) eraseAt(e, c.gx, c.gz);
         else if (TILES[curType] && TILES[curType].half) placeHalf(e, curType, curRot);
         else if (kindOf(curType) === 'tile') placeTile(c.gx, c.gz, curType, curRot);
@@ -510,18 +511,18 @@ function updateSizeCtl() {
 }
 function applyScale(type) { for (const e of objects.values()) if (e.type === type) e.mesh.scale.setScalar(scaleFor(type) * (e.sc || 1)); if (ghost && curType === type) ghost.scale.setScalar(scaleFor(type)); }
 function bumpScale(f) {
-  if (moveMode && selObj) { const ns = Math.min(3, Math.max(0.15, (selObj.sc || 1) * f)); const tg = selObj.pid ? [...objects.values()].filter(o => o.pid === selObj.pid) : [selObj]; for (const o of tg) { o.sc = ns; o.mesh.scale.setScalar(scaleFor(o.type) * ns); } updateSizeCtl(); scheduleSave(); return; }   // taille de l'objet (ou des 2 lampadaires de la paire)
-  if (!curType || kindOf(curType) !== 'object') return; objScale[curType] = Math.min(3, Math.max(0.15, scaleFor(curType) * f)); applyScale(curType); updateSizeCtl(); scheduleSave();   // re-dimensionne tous les objets de ce type
+  if (moveMode && selObj) { pushUndo(); const ns = Math.min(3, Math.max(0.15, (selObj.sc || 1) * f)); const tg = selObj.pid ? [...objects.values()].filter(o => o.pid === selObj.pid) : [selObj]; for (const o of tg) { o.sc = ns; o.mesh.scale.setScalar(scaleFor(o.type) * ns); } updateSizeCtl(); scheduleSave(); return; }   // taille de l'objet (ou des 2 lampadaires de la paire)
+  if (!curType || kindOf(curType) !== 'object') return; pushUndo(); objScale[curType] = Math.min(3, Math.max(0.15, scaleFor(curType) * f)); applyScale(curType); updateSizeCtl(); scheduleSave();   // re-dimensionne tous les objets de ce type
 }
 function applyOffset(type) { const off = offFor(type); for (const e of objects.values()) if (e.type === type && e.pid) { if (e.axis === 'x') e.oz = e.side * off; else e.ox = e.side * off; e.mesh.position.set(e.gx * T + e.ox, 0.03, e.gz * T + e.oz); } }
-function bumpOffset(d) { if (!curType || !PAIRED[curType]) return; objOff[curType] = Math.min(6.6, Math.max(3.2, offFor(curType) + d)); applyOffset(curType); scheduleSave(); }   // rapproche/éloigne la paire de la route
+function bumpOffset(d) { if (!curType || !PAIRED[curType]) return; pushUndo(); objOff[curType] = Math.min(6.6, Math.max(3.2, offFor(curType) + d)); applyOffset(curType); scheduleSave(); }   // rapproche/éloigne la paire de la route
 document.getElementById('szM').onclick = () => bumpScale(0.85);
 document.getElementById('szP').onclick = () => bumpScale(1.18);
 document.getElementById('offM').onclick = () => bumpOffset(-0.6);
 document.getElementById('offP').onclick = () => bumpOffset(0.6);
-function bumpY(d) { if (!(moveMode && selObj)) return; const tg = selObj.pid ? [...objects.values()].filter(o => o.pid === selObj.pid) : [selObj]; for (const o of tg) { o.dy = (o.dy || 0) + d; o.mesh.position.y = OBJ_Y + o.dy; } scheduleSave(); }   // enfonce/relève l'objet
-function bumpWaterY(d) { if (!(moveMode && selObj && selObj.type === 'lac')) return; selObj.waterDy = (selObj.waterDy || 0) + d; applyLakeWater(selObj); scheduleSave(); }
-function bumpWaterS(f) { if (!(moveMode && selObj && selObj.type === 'lac')) return; selObj.waterScale = Math.min(2, Math.max(0.3, (selObj.waterScale || 1) * f)); applyLakeWater(selObj); scheduleSave(); }
+function bumpY(d) { if (!(moveMode && selObj)) return; pushUndo(); const tg = selObj.pid ? [...objects.values()].filter(o => o.pid === selObj.pid) : [selObj]; for (const o of tg) { o.dy = (o.dy || 0) + d; o.mesh.position.y = OBJ_Y + o.dy; } scheduleSave(); }   // enfonce/relève l'objet
+function bumpWaterY(d) { if (!(moveMode && selObj && selObj.type === 'lac')) return; pushUndo(); selObj.waterDy = (selObj.waterDy || 0) + d; applyLakeWater(selObj); scheduleSave(); }
+function bumpWaterS(f) { if (!(moveMode && selObj && selObj.type === 'lac')) return; pushUndo(); selObj.waterScale = Math.min(2, Math.max(0.3, (selObj.waterScale || 1) * f)); applyLakeWater(selObj); scheduleSave(); }
 document.getElementById('dnBtn').onclick = () => bumpY(-0.2);
 document.getElementById('upBtn').onclick = () => bumpY(0.2);
 document.getElementById('wlDn').onclick = () => bumpWaterY(-0.12);
@@ -529,14 +530,14 @@ document.getElementById('wlUp').onclick = () => bumpWaterY(0.12);
 document.getElementById('wsM').onclick = () => bumpWaterS(0.92);
 document.getElementById('wsP').onclick = () => bumpWaterS(1.08);
 function rotateAction() {
-  if (moveMode && selObj) { const tg = selObj.pid ? [...objects.values()].filter(o => o.pid === selObj.pid) : [selObj]; for (const o of tg) { o.rot = (o.rot + 1) % 4; o.mesh.rotation.y = o.rot * Math.PI / 2; } scheduleSave(); return; }   // tourne l'objet (ou les 2 lampadaires de la paire ensemble)
+  if (moveMode && selObj) { pushUndo(); const tg = selObj.pid ? [...objects.values()].filter(o => o.pid === selObj.pid) : [selObj]; for (const o of tg) { o.rot = (o.rot + 1) % 4; o.mesh.rotation.y = o.rot * Math.PI / 2; } scheduleSave(); return; }   // tourne l'objet (ou les 2 lampadaires de la paire ensemble)
   curRot = (curRot + 1) % 4; if (ghost) ghost.rotation.y = curRot * Math.PI / 2; document.getElementById('rotVal').textContent = curRot * 90 + '°';
 }
 document.getElementById('rotate').onclick = rotateAction;
 document.getElementById('erase').onclick = () => { eraseMode = !eraseMode; if (eraseMode) moveMode = false; if (ghost) ghost.visible = false; highlight(); };
 document.getElementById('move').onclick = () => { moveMode = !moveMode; if (moveMode) { eraseMode = false; curType = null; } else selObj = null; if (ghost) ghost.visible = false; highlight(); };
 function updateModeBtns() { const mv = document.getElementById('move'); mv.style.background = moveMode ? '#36e0d0' : ''; mv.style.color = moveMode ? '#023' : '#fff'; }
-document.getElementById('clear').onclick = () => { if (confirm('Vider toute la carte ?')) { clearAll(); scheduleSave(); } };
+document.getElementById('clear').onclick = () => { if (confirm('Vider toute la carte ?')) { pushUndo(); clearAll(); scheduleSave(); } };
 document.getElementById('view').onclick = () => {
   const to2d = (cam === cam3);
   cam = to2d ? cam2 : cam3; ctr = to2d ? ctr2 : ctr3; ctr3.enabled = !to2d; ctr2.enabled = to2d;
@@ -593,6 +594,16 @@ function restoreLocal() {   // recharge la sauvegarde locale du navigateur (seco
   clearAllSilent(); applyData(d); scheduleTrains(); saveNow(true); toast('✅ Sauvegarde locale restaurée');
 }
 document.getElementById('restore').onclick = restoreLocal;
+// ---------- ANNULER (Ctrl+Z) : historique d'états ----------
+const undoStack = [];
+function pushUndo() { const s = JSON.stringify(serialize()); if (undoStack[undoStack.length - 1] !== s) { undoStack.push(s); if (undoStack.length > 60) undoStack.shift(); } }
+function restoreState(data) { clearAllSilent(); applyData(data); scheduleTrains(); refresh(); scheduleSave(); }
+addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+    e.preventDefault(); if (playMode) return;
+    if (undoStack.length) { restoreState(JSON.parse(undoStack.pop())); toast('↶ Annulé (Ctrl+Z)'); } else toast('Rien à annuler');
+  }
+});
 async function load() {
   let data = null;
   try { const r = await fetch(SB_URL + '/rest/v1/wispy_layout?id=eq.' + LAYOUT_ID + '&select=data', { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON } }); if (r.ok) { const j = await r.json(); data = j && j[0] && j[0].data; } } catch (e) {}
