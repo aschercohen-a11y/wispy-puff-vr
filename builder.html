@@ -558,9 +558,22 @@ function refresh() { document.getElementById('count').textContent = grid.size + 
 // ---------- Décor de fond : collines cartoon à l'horizon (comble les bords vides) ----------
 const bgGroup = new THREE.Group(); scene.add(bgGroup);
 let hillsOn = true, bgSig = '';
-const HILL_DOME = new THREE.SphereGeometry(1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);   // demi-sphère = colline arrondie
-function hillMat(c) { return new THREE.MeshBasicMaterial({ color: c }); }   // unlit + fog auto → les collines lointaines se fondent dans le ciel
-function clearBg() { while (bgGroup.children.length) { const m = bgGroup.children.pop(); if (m.geometry && m.geometry !== HILL_DOME) m.geometry.dispose(); if (m.material) m.material.dispose(); } }
+const MT_CONE = new THREE.ConeGeometry(1, 1, 6);   // cône unité (base en bas, sommet en haut) → montagne facettée cartoon
+const SHARED_GEO = new Set([MT_CONE]);
+function hillMat(c) { return new THREE.MeshBasicMaterial({ color: c }); }   // unlit + fog auto → les montagnes lointaines se fondent dans le ciel
+function clearBg() { while (bgGroup.children.length) { const m = bgGroup.children.pop(); if (m.geometry && !SHARED_GEO.has(m.geometry)) m.geometry.dispose(); if (m.material) m.material.dispose(); } }
+function makeMountain(x, z, rock, snow, R, H, rotY) {
+  const zf = 0.8 + Math.random() * 0.4;   // légère irrégularité de base (même pour roche + neige → cime alignée)
+  // masse rocheuse
+  const rc = new THREE.Mesh(MT_CONE, hillMat(rock));
+  rc.position.set(x, H / 2 - 2, z); rc.scale.set(R, H, R * zf); rc.rotation.y = rotY;
+  bgGroup.add(rc);
+  // glacier / cime enneigée (même sommet, coiffe le haut ~40%)
+  const sf = 0.38 + Math.random() * 0.08;
+  const sc = new THREE.Mesh(MT_CONE, hillMat(snow));
+  sc.position.set(x, H - (H * sf) / 2 - 2, z); sc.scale.set(R * sf, H * sf, R * zf * sf); sc.rotation.y = rotY;
+  bgGroup.add(sc);
+}
 function buildBg() {
   if (!hillsOn) { clearBg(); bgSig = ''; return; }
   // bbox monde de tout ce qui est posé
@@ -578,26 +591,39 @@ function buildBg() {
   bgGroup.position.set(cx, 0, cz);
   const R = ext + 34;
   // grand sol vert circulaire → supprime le vide bleu quadrillé autour de la ville
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(Math.max(R + 120, 330), 64), hillMat(0x86c76a));
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(Math.max(R + 190, 380), 64), hillMat(0x86c76a));
   ground.rotation.x = -Math.PI / 2; ground.position.y = -0.06; bgGroup.add(ground);
-  // 3 anneaux de collines, de plus en plus bleutés/hauts avec la distance (profondeur)
-  const rings = [
-    { r: R, col: 0x7cbf5e, n: 28, h: [6, 12], s: [7, 12] },
-    { r: R + 28, col: 0x93c78a, n: 24, h: [9, 17], s: [10, 16] },
-    { r: R + 64, col: 0xadd0c6, n: 20, h: [13, 23], s: [14, 22] },
+  // petites collines vertes juste au pied (transition douce ville → montagnes)
+  const foot = [
+    { r: R - 10, col: 0x7cbf5e, n: 22, h: [5, 10], s: [8, 13] },
+    { r: R - 2, col: 0x8fce6b, n: 18, h: [7, 13], s: [10, 15] },
   ];
-  for (const rg of rings) {
+  for (const rg of foot) {
     for (let i = 0; i < rg.n; i++) {
-      const a = (i / rg.n) * Math.PI * 2 + (Math.random() - 0.5) * 0.13;
-      const rr = rg.r + (Math.random() - 0.5) * 16;
+      const a = (i / rg.n) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
+      const rr = rg.r + (Math.random() - 0.5) * 14;
       const sx = rg.s[0] + Math.random() * (rg.s[1] - rg.s[0]);
       const hy = rg.h[0] + Math.random() * (rg.h[1] - rg.h[0]);
-      const m = new THREE.Mesh(HILL_DOME, hillMat(rg.col));
-      m.position.set(cx + Math.cos(a) * rr, -1.2, cz + Math.sin(a) * rr);   // base enfoncée → pas de bord plat visible
-      m.scale.set(sx, hy, sx * (0.8 + Math.random() * 0.5));
+      const m = new THREE.Mesh(MT_CONE, hillMat(rg.col));   // colline = cône très écrasé et large
+      m.position.set(Math.cos(a) * rr, hy / 2 - 3, Math.sin(a) * rr);
+      m.scale.set(sx * 1.6, hy, sx * 1.6 * (0.8 + Math.random() * 0.4));
       m.rotation.y = Math.random() * Math.PI;
-      m.position.sub(bgGroup.position);   // exprimé dans le repère du groupe (centré ville)
       bgGroup.add(m);
+    }
+  }
+  // 3 chaînes de montagnes à glaciers, de plus en plus hautes + bleutées (profondeur atmosphérique)
+  const ranges = [
+    { r: R + 22, rock: 0x7f8792, snow: 0xffffff, n: 20, h: [26, 46], s: [12, 20] },
+    { r: R + 58, rock: 0x93a0b6, snow: 0xf3f8ff, n: 18, h: [36, 60], s: [16, 26] },
+    { r: R + 102, rock: 0xb2c0d8, snow: 0xffffff, n: 16, h: [48, 76], s: [20, 32] },
+  ];
+  for (const rg of ranges) {
+    for (let i = 0; i < rg.n; i++) {
+      const a = (i / rg.n) * Math.PI * 2 + (Math.random() - 0.5) * 0.16;
+      const rr = rg.r + (Math.random() - 0.5) * 22;
+      const sx = rg.s[0] + Math.random() * (rg.s[1] - rg.s[0]);
+      const hy = rg.h[0] + Math.random() * (rg.h[1] - rg.h[0]);
+      makeMountain(Math.cos(a) * rr, Math.sin(a) * rr, rg.rock, rg.snow, sx, hy, Math.random() * Math.PI);
     }
   }
 }
