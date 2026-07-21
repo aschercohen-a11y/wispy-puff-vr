@@ -96,6 +96,8 @@ scene.fog = new THREE.Fog(0xbfe0f6, 210, 680);   // portée étendue → les cha
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 document.body.appendChild(renderer.domElement);
+const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();   // filtrage anisotrope max → textures nettes même de biais (rue qui fuit)
+function sharpTex(t) { if (t) { t.anisotropy = MAX_ANISO; t.needsUpdate = true; } return t; }
 
 // caméra 3D (orbite) + caméra 2D (plan de dessus)
 const cam3 = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.5, 1000);
@@ -120,10 +122,10 @@ addEventListener('resize', () => {
 });
 
 // ---------- Textures partagées (unlit / flat cartoon) ----------
-function tex(fn, rep) { const t = new THREE.CanvasTexture(fn()); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; if (rep) t.repeat.set(rep[0], rep[1]); return t; }
+function tex(fn, rep) { const t = new THREE.CanvasTexture(fn()); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; if (rep) t.repeat.set(rep[0], rep[1]); return sharpTex(t); }
 const GRASS_TEX = tex(() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'); x.fillStyle = '#6f9d52'; x.fillRect(0, 0, 64, 64); for (let i = 0; i < 90; i++) { x.fillStyle = ['#659149', '#79a95c', '#5f8a45'][i % 3]; x.fillRect(Math.random() * 64, Math.random() * 64, 2, 3); } return c; });
 const TILE_TEX_SRC = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'); x.fillStyle = '#c3bcaa'; x.fillRect(0, 0, 128, 128); x.strokeStyle = 'rgba(120,114,102,0.6)'; x.lineWidth = 4; for (let i = 0; i <= 128; i += 32) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); } return c; })();
-function tileTex(rep) { const t = new THREE.CanvasTexture(TILE_TEX_SRC); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); return t; }
+function tileTex(rep) { const t = new THREE.CanvasTexture(TILE_TEX_SRC); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); return sharpTex(t); }
 const ASPH = new THREE.MeshBasicMaterial({ color: 0x555a63 });
 const LINE = new THREE.MeshBasicMaterial({ color: 0xf2e7c4 });
 const EDGE = new THREE.MeshBasicMaterial({ color: 0xe9e4d2 });
@@ -274,7 +276,7 @@ const BUILDINGS = {   // grands bâtiments Meshy (optimisés : ~50k tris, ~1 MB)
   granderoue:{ label: '🎡 Grande roue',        file: 'wheel', foot: 16, custom: true },
 };
 const OBJ_ASSET = {};   // assets de la couche OBJETS : maisons GLB + immeubles + déco procédurale
-function unlit(root) { root.traverse(m => { if (!m.isMesh || !m.material) return; const conv = (s) => { if (s.map) s.map.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshBasicMaterial({ map: s.map || null, color: s.map ? 0xffffff : (s.color ? s.color.clone() : new THREE.Color(0xffffff)), side: THREE.DoubleSide, transparent: !!s.transparent, opacity: s.opacity != null ? s.opacity : 1 }); }; m.material = Array.isArray(m.material) ? m.material.map(conv) : conv(m.material); }); }
+function unlit(root) { root.traverse(m => { if (!m.isMesh || !m.material) return; const conv = (s) => { if (s.map) { s.map.colorSpace = THREE.SRGBColorSpace; sharpTex(s.map); } return new THREE.MeshBasicMaterial({ map: s.map || null, color: s.map ? 0xffffff : (s.color ? s.color.clone() : new THREE.Color(0xffffff)), side: THREE.DoubleSide, transparent: !!s.transparent, opacity: s.opacity != null ? s.opacity : 1 }); }; m.material = Array.isArray(m.material) ? m.material.map(conv) : conv(m.material); }); }
 function fitObject(root, foot) { root.updateMatrixWorld(true); let b = new THREE.Box3().setFromObject(root); const w = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) || 1; root.scale.setScalar(foot / w); root.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(root); root.position.y = -b.min.y; const g = new THREE.Group(); g.add(root); return g; }
 // eau animée pour le lac : disque bleu transparent + ondulations, placés dans la cuvette
 const LAKE_RIPPLE = (function () { const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'); x.clearRect(0, 0, 128, 128); x.strokeStyle = 'rgba(255,255,255,0.5)'; for (let i = 0; i < 12; i++) { x.lineWidth = 1 + Math.random() * 1.6; x.beginPath(); x.arc(Math.random() * 128, Math.random() * 128, 6 + Math.random() * 22, 0, Math.PI * 2); x.stroke(); } const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 3); return t; })();
@@ -336,7 +338,7 @@ for (const src of [HOUSES, BUILDINGS]) for (const k in src) { const h = src[k]; 
 gltf.load('models/mobilier_urbain.glb', (g) => {
   let mesh = null; g.scene.traverse(o => { if (o.isMesh && !mesh) mesh = o; });
   if (!mesh) return;
-  const src = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material; if (src.map) src.map.colorSpace = THREE.SRGBColorSpace;
+  const src = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material; if (src.map) { src.map.colorSpace = THREE.SRGBColorSpace; sharpTex(src.map); }
   const sharedMat = new THREE.MeshBasicMaterial({ map: src.map || null, color: 0xffffff, side: THREE.DoubleSide });   // unlit + 1 seule texture pour les 6
   const pieces = splitByX(mesh, 6);
   pieces.forEach((pc, i) => {
