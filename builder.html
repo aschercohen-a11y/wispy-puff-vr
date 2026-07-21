@@ -97,6 +97,7 @@ scene.fog = new THREE.Fog(0xbfe0f6, 210, 680);   // portée étendue → les cha
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.xr.enabled = true;   // WebXR : runner jouable en VR sur le casque
+try { renderer.xr.setFramebufferScaleFactor(1.3); } catch (e) {}   // suréchantillonnage → images plus nettes dans le casque
 document.body.appendChild(renderer.domElement);
 const vrBtn = VRButton.createButton(renderer); vrBtn.style.zIndex = 70; document.body.appendChild(vrBtn);   // bouton « Enter VR » (visible sur le Quest)
 const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();   // filtrage anisotrope max → textures nettes même de biais (rue qui fuit)
@@ -953,7 +954,7 @@ const dolly = new THREE.Group(); scene.add(dolly);   // rig du joueur : on le d�
 // vignette de confort (tunnel) attachée à la tête → réduit le mal de mer pendant la course
 const vignette = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
-  const g = x.createRadialGradient(128, 128, 66, 128, 128, 132); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.9)');
+  const g = x.createRadialGradient(128, 128, 98, 128, 128, 150); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.6)');
   x.fillStyle = g; x.fillRect(0, 0, 256, 256);
   const m = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false, depthWrite: false }));
   m.position.z = -1; m.renderOrder = 999; m.frustumCulled = false; m.visible = false; return m;
@@ -965,7 +966,8 @@ renderer.xr.addEventListener('sessionstart', () => {
   if (!road) { toast('🛣️ Construis une route d\'abord !'); vrReady = false; return; }
   runAxis = road.axis; runFixed = road.fixed * T; runStart = road.a * T - T / 2 + 4; runEnd = road.b * T + T / 2;
   runP = runStart; runLane = 0; runY = 0; runVY = 0;
-  dolly.add(cam3); ctr3.enabled = false; vignette.visible = true; if (hero) hero.visible = false;   // 1re personne : on EST le coureur
+  dolly.add(cam3); ctr3.enabled = false; vignette.visible = true; if (hero) hero.visible = true;   // 3e personne : on suit le perso
+  try { renderer.xr.setFoveation(0); } catch (e) {}   // coupe le flou périphérique du Quest → net même en regardant sur les côtés
   vrReady = true;
 });
 renderer.xr.addEventListener('sessionend', () => {
@@ -983,14 +985,23 @@ function readVRInput() {
   if (Math.abs(ax) < 0.35) laneReady = true; else if (laneReady) { runLane = Math.max(-1, Math.min(1, runLane + (ax > 0 ? 1 : -1))); laneReady = false; }
   if (!jump) jumpReady = true; else if (jumpReady && runY <= 0.02) { runVY = JUMP_V; jumpReady = false; }
 }
+const VR_BACK = 6, VR_UP = 1.5;   // caméra : recul derrière le perso + élévation (vue « Subway » un peu plongeante)
 function updateVRRunner(dt) {
   if (!vrReady) return;
   readVRInput();
   runP += RUN_SPEED * dt; if (runP > runEnd + 6) runP = runStart;   // course auto + boucle
   if (runVY !== 0 || runY > 0) { runVY -= GRAV * dt; runY += runVY * dt; if (runY <= 0) { runY = 0; runVY = 0; } }   // saut
-  const cross = runFixed + runLane * LANE_W;
-  if (runAxis === 'x') { dolly.position.set(runP, runY, cross); dolly.rotation.y = -Math.PI / 2; }   // face à +x
-  else { dolly.position.set(cross, runY, runP); dolly.rotation.y = Math.PI; }                        // face à +z
+  const cross = runFixed + runLane * LANE_W, lerp = Math.min(1, dt * 14);
+  if (runAxis === 'x') {
+    if (hero) { hero.position.x = runP; hero.position.z += (cross - hero.position.z) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = Math.PI / 2; }
+    const hz = hero ? hero.position.z : cross;
+    dolly.position.set(runP - VR_BACK, runY + VR_UP, hz); dolly.rotation.y = -Math.PI / 2;   // rig derrière le perso, face à +x
+  } else {
+    if (hero) { hero.position.z = runP; hero.position.x += (cross - hero.position.x) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = 0; }
+    const hx = hero ? hero.position.x : cross;
+    dolly.position.set(hx, runY + VR_UP, runP - VR_BACK); dolly.rotation.y = Math.PI;   // rig derrière le perso, face à +z
+  }
+  if (hero && heroMix) heroMix.update(dt);
 }
 
 // hook de test (inoffensif)
