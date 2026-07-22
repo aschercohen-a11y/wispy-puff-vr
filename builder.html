@@ -17,6 +17,10 @@
   button.act { background: #2f7bd6; color: #fff; text-align: center; }
   button.warn { background: #d6553f; color: #fff; text-align: center; }
   button.tile:disabled { opacity: .4; cursor: default; }
+  button.tile.thumb { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; width: calc(50% - 5px); padding: 5px 4px; margin: 3px 2px; vertical-align: top; text-align: center; }
+  button.tile.thumb img { width: 100%; height: 52px; object-fit: contain; background: rgba(255,255,255,.07); border-radius: 6px; }
+  button.tile.thumb span { font-size: 10.5px; line-height: 1.15; }
+  button.tile.thumb.on { background: #36e0d0; color: #023; }
   .cat > .head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 8px; margin-top: 6px; background: rgba(60,92,134,.4); border-radius: 7px; font-weight: bold; font-size: 13px; }
   .cat > .body { display: none; margin-top: 2px; }
   .cat.open > .body { display: block; }
@@ -324,6 +328,42 @@ const ROWB = {
   grand2:       { label: '🏢 Grand immeuble bleu',  foot: 9 },
   grand3:       { label: '🏢 Grand immeuble rouge', foot: 9 },
 };
+// ---------- PALM CITY (Synty) : modèles convertis, atlas partagé + textures palmiers, vignettes ----------
+const SYN_ROUTES = {
+  syn_road:    { label: 'Route', file: 'SM_Env_Road_Highway_01', foot: 14 },
+  syn_roadc:   { label: 'Virage', file: 'SM_Env_Road_Highway_Corner_01', foot: 14 },
+  syn_dock1:   { label: 'Ponton', file: 'SM_Bld_Dock_Platform_01', foot: 12 },
+  syn_dock2:   { label: 'Ponton 2', file: 'SM_Bld_Dock_Platform_02', foot: 12 },
+  syn_dockend: { label: 'Ponton bout', file: 'SM_Bld_Dock_Platform_End_01', foot: 10 },
+  syn_dockt:   { label: 'Ponton T', file: 'SM_Bld_Dock_Platform_T_01', foot: 12 },
+};
+const SYN_IMM = {
+  syn_shop1: { label: 'Beach shop 1', file: 'SM_Bld_Beach_Shop_01', foot: 8 },
+  syn_shop2: { label: 'Beach shop 2', file: 'SM_Bld_Beach_Shop_02', foot: 8 },
+  syn_shop3: { label: 'Beach shop 3', file: 'SM_Bld_Beach_Shop_03', foot: 8 },
+};
+const SYN_PLAGE = {
+  syn_palm1: { label: 'Palmier 1', file: 'SM_Env_Tree_Palm_01', foot: 5 },
+  syn_palm2: { label: 'Palmier 2', file: 'SM_Env_Tree_Palm_02', foot: 5 },
+  syn_palm3: { label: 'Palmier 3', file: 'SM_Env_Tree_Palm_03', foot: 5 },
+  syn_palm4: { label: 'Palmier 4', file: 'SM_Env_Tree_Palm_04', foot: 5 },
+  syn_bush1: { label: 'Buisson 1', file: 'SM_Env_Bush_01', foot: 2.5 },
+  syn_bush2: { label: 'Buisson 2', file: 'SM_Env_Bush_02', foot: 2.5 },
+};
+const SYN_VEH = {
+  syn_buggy:  { label: 'Buggy', file: 'SM_Veh_Buggy_01', foot: 4 },
+  syn_moped:  { label: 'Mobylette', file: 'SM_Veh_Moped_01', foot: 2.4 },
+  syn_limo:   { label: 'Limousine', file: 'SM_Veh_Limousine_01', foot: 6 },
+  syn_pickup: { label: 'Pickup', file: 'SM_Veh_Pickup_01', foot: 4.5 },
+  syn_moto:   { label: 'Moto', file: 'SM_Veh_Motorbike_01', foot: 2.4 },
+};
+const SYN_MOB = {
+  syn_bench: { label: 'Banc', file: 'SM_Prop_Bench_Seat_01', foot: 2.5 },
+  syn_chair: { label: 'Chaise', file: 'SM_Prop_Chair_01', foot: 1.2 },
+};
+const SYNTY_SETS = [SYN_ROUTES, SYN_IMM, SYN_PLAGE, SYN_VEH, SYN_MOB];
+function isSynty(t) { return SYNTY_SETS.some(s => s[t]); }
+function syntyDef(t) { for (const s of SYNTY_SETS) if (s[t]) return s[t]; return null; }
 // découpe un mesh fusionné en N îlots le long de X (objets alignés espacés) → N géométries recentrées et posées au sol
 function splitByX(mesh, N) {
   const g = mesh.geometry, pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv, idx = g.index;
@@ -379,6 +419,24 @@ function loadRow(file, keys) {
 }
 loadRow('row_petit.glb', ['petit_bakery', 'petit_books', 'petit_cafe']);
 loadRow('row_grand.glb', ['grand1', 'grand2', 'grand3']);
+// PALM CITY : atlas bâtiments partagé (1 seule texture) + textures palmiers embarquées
+const SYNTY_ATLAS = new THREE.TextureLoader().load('models/synty/atlas.png', t => { t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; sharpTex(t); });
+const syntyMat = new THREE.MeshBasicMaterial({ map: SYNTY_ATLAS, side: THREE.DoubleSide });
+for (const set of SYNTY_SETS) for (const k in set) {
+  const def = set[k];
+  gltf.load('models/synty/' + def.file + '.glb', (g) => {
+    const root = g.scene;
+    root.traverse(m => {
+      if (!m.isMesh) return;
+      if (m.material && m.material.map) {   // palmiers/buissons : texture embarquée (feuilles avec alpha)
+        m.material.map.colorSpace = THREE.SRGBColorSpace; sharpTex(m.material.map);
+        m.material = new THREE.MeshBasicMaterial({ map: m.material.map, side: THREE.DoubleSide, alphaTest: 0.5 });
+      } else m.material = syntyMat;   // bâtiments/véhicules/props : atlas partagé
+    });
+    OBJ_ASSET[k] = fitObject(root, def.foot);
+    const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) btn.disabled = false;
+  });
+}
 // GRANDE ROUE : pied Meshy + roue Meshy (redressée) + rotation animée. Roue centrée ENTRE les montants du pied.
 (function () {
   const gl = new GLTFLoader();
@@ -416,7 +474,7 @@ gltf.load('models/rail_meshy.glb', (g) => {
   for (const [k, e] of grid) if (e.type === 'rail_meshy') { worldGroup.remove(e.mesh); const [gx, gz] = k.split('_').map(Number); const mesh = grp.clone(true); mesh.position.set(gx * T, 0, gz * T); mesh.rotation.y = e.rot * Math.PI / 2; worldGroup.add(mesh); e.mesh = mesh; }
   scheduleTrains();
 });
-function kindOf(t) { return TILES[t] ? 'tile' : ((HOUSES[t] || BUILDINGS[t] || DECO[t] || STREET[t] || ROWB[t]) ? 'object' : null); }
+function kindOf(t) { return TILES[t] ? 'tile' : ((HOUSES[t] || BUILDINGS[t] || DECO[t] || STREET[t] || ROWB[t] || isSynty(t)) ? 'object' : null); }
 function assetOf(t) { return TILES[t] ? ASSET[t] : OBJ_ASSET[t]; }
 
 // ---------- État de la carte ----------
@@ -572,12 +630,32 @@ addEventListener('keydown', (e) => { if ((e.key === 'r' || e.key === 'R') && !pl
 
 // ---------- UI : palette en rubriques repliables ----------
 const pal = document.getElementById('pal');
-const CATS = [{ name: '🛣️ Routes', items: TILES, open: true }, { name: '🏠 Maisons', items: HOUSES, open: false }, { name: '🏢 Immeubles & lieux', items: BUILDINGS, open: false }, { name: '🏘️ Immeubles de rue', items: ROWB, open: false }, { name: '🪑 Mobilier urbain', items: STREET, open: false }, { name: '🌿 Déco', items: DECO, open: false }];
+const CATS = [
+  { name: '🛣️ Palm City — Routes & pontons', items: SYN_ROUTES, open: true },
+  { name: '🏪 Palm City — Immeubles', items: SYN_IMM, open: false },
+  { name: '🌴 Palm City — Plage & nature', items: SYN_PLAGE, open: false },
+  { name: '🚗 Palm City — Véhicules', items: SYN_VEH, open: false },
+  { name: '🪑 Palm City — Mobilier', items: SYN_MOB, open: false },
+  { name: '🛣️ (Ancien) Routes', items: TILES, open: false },
+  { name: '🏠 (Ancien) Maisons', items: HOUSES, open: false },
+  { name: '🏢 (Ancien) Immeubles', items: BUILDINGS, open: false },
+  { name: '🏘️ (Ancien) Immeubles de rue', items: ROWB, open: false },
+  { name: '🪑 (Ancien) Mobilier', items: STREET, open: false },
+  { name: '🌿 (Ancien) Déco', items: DECO, open: false },
+];
 for (const cat of CATS) {
   const wrap = document.createElement('div'); wrap.className = 'cat' + (cat.open ? ' open' : '');
   const head = document.createElement('div'); head.className = 'head'; head.innerHTML = '<span>' + cat.name + '</span><span class="arw">▸</span>'; head.onclick = () => wrap.classList.toggle('open');
   const body = document.createElement('div'); body.className = 'body';
-  for (const k in cat.items) { const b = document.createElement('button'); b.className = 'tile'; b.textContent = cat.items[k].label; b.dataset.t = k; if ((cat.items === HOUSES || cat.items === BUILDINGS || cat.items === STREET || cat.items === ROWB) && !OBJ_ASSET[k]) { b.disabled = true; b.textContent = '⏳ ' + cat.items[k].label; } if (cat.items === TILES && TILES[k].async) b.disabled = true; b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); }; body.appendChild(b); }
+  const isSyn = SYNTY_SETS.indexOf(cat.items) >= 0;
+  for (const k in cat.items) {
+    const it = cat.items[k];
+    const b = document.createElement('button'); b.className = 'tile'; b.dataset.t = k;
+    if (isSyn) { b.classList.add('thumb'); b.innerHTML = '<img src="thumbs/' + it.file + '.png" loading="lazy" alt=""><span>' + it.label + '</span>'; if (!OBJ_ASSET[k]) b.disabled = true; }
+    else { b.textContent = it.label; if ((cat.items === HOUSES || cat.items === BUILDINGS || cat.items === STREET || cat.items === ROWB) && !OBJ_ASSET[k]) { b.disabled = true; b.textContent = '⏳ ' + it.label; } if (cat.items === TILES && TILES[k].async) b.disabled = true; }
+    b.onclick = () => { if (curType === k && !eraseMode) { curType = null; } else { curType = k; eraseMode = false; } makeGhost(); highlight(); };
+    body.appendChild(b);
+  }
   wrap.appendChild(head); wrap.appendChild(body); pal.appendChild(wrap);
 }
 function highlight() { for (const b of pal.querySelectorAll('button.tile')) b.classList.toggle('on', !eraseMode && b.dataset.t === curType); document.getElementById('erase').style.background = eraseMode ? '#36e0d0' : ''; document.getElementById('erase').style.color = eraseMode ? '#023' : '#fff'; updateSizeCtl(); updateModeBtns(); }
