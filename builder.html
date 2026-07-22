@@ -330,12 +330,8 @@ const ROWB = {
 };
 // ---------- PALM CITY (Synty) : modèles convertis, atlas partagé + textures palmiers, vignettes ----------
 const SYN_ROUTES = {
-  syn_road:    { label: 'Route', file: 'SM_Env_Road_Highway_01', foot: 14 },
+  syn_road:    { label: 'Route droite', file: 'SM_Env_Road_Highway_01', foot: 14 },
   syn_roadc:   { label: 'Virage', file: 'SM_Env_Road_Highway_Corner_01', foot: 14 },
-  syn_dock1:   { label: 'Ponton', file: 'SM_Bld_Dock_Platform_01', foot: 12 },
-  syn_dock2:   { label: 'Ponton 2', file: 'SM_Bld_Dock_Platform_02', foot: 12 },
-  syn_dockend: { label: 'Ponton bout', file: 'SM_Bld_Dock_Platform_End_01', foot: 10 },
-  syn_dockt:   { label: 'Ponton T', file: 'SM_Bld_Dock_Platform_T_01', foot: 12 },
 };
 const SYN_IMM = {
   syn_shop1: { label: 'Beach shop 1', file: 'SM_Bld_Beach_Shop_01', foot: 8 },
@@ -343,23 +339,24 @@ const SYN_IMM = {
   syn_shop3: { label: 'Beach shop 3', file: 'SM_Bld_Beach_Shop_03', foot: 8 },
 };
 const SYN_PLAGE = {
-  syn_palm1: { label: 'Palmier 1', file: 'SM_Env_Tree_Palm_01', foot: 5 },
-  syn_palm2: { label: 'Palmier 2', file: 'SM_Env_Tree_Palm_02', foot: 5 },
-  syn_palm3: { label: 'Palmier 3', file: 'SM_Env_Tree_Palm_03', foot: 5 },
-  syn_palm4: { label: 'Palmier 4', file: 'SM_Env_Tree_Palm_04', foot: 5 },
-  syn_bush1: { label: 'Buisson 1', file: 'SM_Env_Bush_01', foot: 2.5 },
-  syn_bush2: { label: 'Buisson 2', file: 'SM_Env_Bush_02', foot: 2.5 },
+  syn_palm1: { label: 'Palmier 1', file: 'SM_Env_Tree_Palm_01', foot: 5, foliage: true },
+  syn_palm2: { label: 'Palmier 2', file: 'SM_Env_Tree_Palm_02', foot: 5, foliage: true },
+  syn_palm3: { label: 'Palmier 3', file: 'SM_Env_Tree_Palm_03', foot: 5, foliage: true },
+  syn_palm4: { label: 'Palmier 4', file: 'SM_Env_Tree_Palm_04', foot: 5, foliage: true },
+  syn_bush1: { label: 'Buisson 1', file: 'SM_Env_Bush_01', foot: 2.5, foliage: true },
+  syn_bush2: { label: 'Buisson 2', file: 'SM_Env_Bush_02', foot: 2.5, foliage: true },
 };
 const SYN_VEH = {
   syn_buggy:  { label: 'Buggy', file: 'SM_Veh_Buggy_01', foot: 4 },
-  syn_moped:  { label: 'Mobylette', file: 'SM_Veh_Moped_01', foot: 2.4 },
   syn_limo:   { label: 'Limousine', file: 'SM_Veh_Limousine_01', foot: 6 },
+  syn_moped:  { label: 'Mobylette', file: 'SM_Veh_Moped_01', foot: 2.4 },
   syn_pickup: { label: 'Pickup', file: 'SM_Veh_Pickup_01', foot: 4.5 },
   syn_moto:   { label: 'Moto', file: 'SM_Veh_Motorbike_01', foot: 2.4 },
 };
 const SYN_MOB = {
-  syn_bench: { label: 'Banc', file: 'SM_Prop_Bench_Seat_01', foot: 2.5 },
-  syn_chair: { label: 'Chaise', file: 'SM_Prop_Chair_01', foot: 1.2 },
+  syn_bench:    { label: 'Banc', file: 'SM_Prop_Bench_Seat_01', foot: 2.5 },
+  syn_chair:    { label: 'Chaise', file: 'SM_Prop_Chair_01', foot: 1.2 },
+  syn_jumelles: { label: 'Jumelles', file: 'SM_Prop_Binoculars_01', foot: 1.5 },
 };
 const SYNTY_SETS = [SYN_ROUTES, SYN_IMM, SYN_PLAGE, SYN_VEH, SYN_MOB];
 function isSynty(t) { return SYNTY_SETS.some(s => s[t]); }
@@ -419,19 +416,16 @@ function loadRow(file, keys) {
 }
 loadRow('row_petit.glb', ['petit_bakery', 'petit_books', 'petit_cafe']);
 loadRow('row_grand.glb', ['grand1', 'grand2', 'grand3']);
-// PALM CITY : atlas bâtiments partagé (1 seule texture) + textures palmiers embarquées
-const SYNTY_ATLAS = new THREE.TextureLoader().load('models/synty/atlas.png', t => { t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; sharpTex(t); });
-const syntyMat = new THREE.MeshBasicMaterial({ map: SYNTY_ATLAS, side: THREE.DoubleSide });
+// PALM CITY : chaque modèle a SA texture embarquée (correcte) ; feuillages = vertex colors (le vert Synty)
 for (const set of SYNTY_SETS) for (const k in set) {
   const def = set[k];
   gltf.load('models/synty/' + def.file + '.glb', (g) => {
     const root = g.scene;
     root.traverse(m => {
       if (!m.isMesh) return;
-      if (m.material && m.material.map) {   // palmiers/buissons : texture embarquée (feuilles avec alpha)
-        m.material.map.colorSpace = THREE.SRGBColorSpace; sharpTex(m.material.map);
-        m.material = new THREE.MeshBasicMaterial({ map: m.material.map, side: THREE.DoubleSide, alphaTest: 0.5 });
-      } else m.material = syntyMat;   // bâtiments/véhicules/props : atlas partagé
+      const s = Array.isArray(m.material) ? m.material[0] : m.material;
+      if (s && s.map) { s.map.colorSpace = THREE.SRGBColorSpace; sharpTex(s.map); }
+      m.material = new THREE.MeshBasicMaterial({ map: s && s.map ? s.map : null, color: 0xffffff, side: THREE.DoubleSide, transparent: !!(s && s.transparent), alphaTest: def.foliage ? 0.5 : 0, vertexColors: !!def.foliage });
     });
     OBJ_ASSET[k] = fitObject(root, def.foot);
     const btn = document.querySelector('button[data-t="' + k + '"]'); if (btn) btn.disabled = false;
