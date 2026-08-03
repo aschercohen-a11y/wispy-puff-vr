@@ -7,7 +7,58 @@
 
 ---
 
-## 🔖 REPRISE DE SESSION — LIRE EN PREMIER
+## 🔬 SESSION 2026-08-03 — NETTETÉ VR RETROUVÉE (builder.html) — LIRE EN PREMIER
+
+> Constat du user : « les immeubles rendent mal en VR, c'était plus immersif au début ». **Ce n'était pas Meshy.**
+
+**3 causes mesurées, toutes corrigées :**
+
+1. **Le framebuffer avait été écrasé.** Historique de `builder.html` : `fee0075` 1.3/foveation 0 → `b687b4e` 1.0/0.4 → `4ca08eb` 1.2/0.25 → `57fc728` **0.85/0.6**. Soit **2,3× moins de pixels** + gros flou périphérique. Remis à **1.3 / foveation 0** — le culling agressif ajouté entre-temps paie la facture (à l'époque où c'était beau, il n'y avait aucun culling).
+2. **Palm City (Synty) coûtait ~1 Go de VRAM pour rien.** L'atlas 4096×4096 était embarqué dans **12 GLB distincts**, tous chargés au boot (boucle `for (const set of SYNTY_SETS)`) → 12 textures GPU séparées de ~89 Mo. La carte n'utilisait que **3 tuiles de route**. → `SYNTY_SETS = []` (définitions `SYN_*` gardées en code mort, remettre les sets dans le tableau réactive tout). Palette repassée à 6 rubriques, plus d'étiquette « (Ancien) » sur les modèles Meshy.
+3. **Les modèles étaient géométrie-lourds et texture-pauvres.** La résidence : 255 k triangles pour des textures **512**, alors que l'original Meshy est en **2048**. Et chaque modèle embarquait **4 textures** (albédo/normal/roughness/métallique) alors que `builder.html` est unlit et n'utilise que `map` → ~60 % de poids mort.
+
+**Les 30 modèles régénérés depuis les originaux** (`C:\Users\asche\Downloads\*.glb`, tous en 2048) : **59,9 Mo → 33,4 Mo**, albédo seul en 2048 (1024 pour les petits objets), budget de triangles par modèle. Correspondance original↔jeu retrouvée par proportions de boîte englobante (POSITION uniquement — inclure les normales fausse tout) ; aucun modèle n'avait été réorienté par l'ancien pipeline.
+
+**⚠️ Deux outils cassés qu'il faut contourner :**
+- `gltf-transform simplify` **bute sur un plancher** avec les modèles Meshy (255 k triangles quel que soit `--ratio`) : leurs pièces séparées créent des bords que meshoptimizer refuse d'effondrer. → **`dev/decimate2.py`** : soudure des sommets (`remove_doubles`) **puis** décimation Blender. C'est la soudure qui débloque.
+- `gltf-transform --texture-compress webp` **plante** sur cette machine (`sharp`/libvips : `VipsInterpretation` valeur 32 invalide). → **`dev/albedo_webp.py`** (Pillow). Il supprime aussi les textures orphelines **avec réindexation** — les laisser avec un `bufferView` périmé fait planter `prune` (« Cannot read properties of undefined »).
+
+**Scripts ajoutés :** `dev/decimate2.py`, `dev/albedo_webp.py`, `dev/batch_models.py` (pilote complet : décime → texture → prune/quantize → rendu de contrôle dans `dev/preview/`).
+
+**⚠️ Ne jamais passer dans ce pipeline :** `character.glb` (squelette + alpha BLEND, toute simplification casse le skin) · `pp_tree.glb` / `pp_cartoonhouse.glb` (Poly Pizza CC0, pas d'original Meshy).
+
+**Pièges vérifiés :** `loadRow`/`mobilier_urbain` découpent le premier maillage en bandes via `splitByX` → étendues X contrôlées identiques avant/après. La grande roue tourne via un `Group` créé en JS (ligne ~454), pas via des sous-objets du GLB → joindre les maillages est sans risque. `builder.html` ne charge que `montagne1` et `montagne2` (pas `montagne3`).
+
+**Reste à faire :** si c'est net mais encore **plat**, le levier suivant est l'éclairage — `builder.html` est unlit par conception (couleurs identiques entre tuiles), passer en `MeshLambertMaterial` + un soleil rendrait le volume sans coûter cher. Puis l'**instancing** (aucun `InstancedMesh` aujourd'hui ; 34 lampadaires + 21 palmiers = 55 draw calls évitables).
+
+---
+
+## 🏗️ SESSION 2026-07-25 — CONSTRUCTEUR DE VILLE (Synty Palm City) — LIRE EN PREMIER
+
+> Nouveau chantier en parallèle du jeu : un **éditeur/visionneuse web maison** de tout le pack **Synty POLYGON Palm City** (1096 pièces), pour construire un niveau sans Unity (qui rame trop sur le PC du user), puis l'injecter dans Unity pour le Quest.
+
+**Lancer :**
+```
+cd C:\Users\asche\Downloads\claude\Oculus
+python -m http.server 8899 --bind 127.0.0.1
+```
+→ http://127.0.0.1:8899/constructeur.html (Chrome/Edge, toujours **Ctrl+Shift+R** après une modif).
+Node installé → valider chaque édition JS avec `node --check`.
+
+**Fichier éditeur :** `constructeur.html` (three.js r160, `vendor/` local).
+**Données :** `models/synty_bld/` (1096 .glb légers) + `tex/` (150 textures + Plaster_40 du user) + JSON : `manifest.json` (catégories), `piece_mats.json` (matériau Synty par sous-partie), `tex_manifest.json`, `alpha_tex.json` (16 textures à découpe), `veg_tex.json` (42 végétaux tronc/feuille), `ground_surf.json` (surface des dalles).
+
+**Ce qui marche :** panneau pièces à droite (catégories + recherche + gros aperçu au survol), textures/couleurs à gauche, **Rendu Synty d'origine** (vraies couleurs pièce par pièce), aimant + **repères d'alignement roses** type Photoshop, mode multi + sélection rectangle, redimensionner/miroir/rotation 3 axes/hauteur, **Ctrl+Z universel**, dupliquer, **⬇️ Niveau (.json)** (= la vraie sauvegarde, contient tout) / **⬆️ Importer .json**, **⬇️ Export .glb** (UV cuits, rendu identique dans Unity).
+
+**Gros correctifs faits :** rendu Synty par sous-partie (encadrements colorés), trottoirs/routes/toits en placage UV, feuillages (transparence + couleurs de sommets), **44 végétaux reconvertis** (étaient 100× trop grands + couchés → droits/bonne taille), **palmiers double texture** (tronc écorce + palmes vertes, maillage découpé selon masque COLOR_1.b), **dalles alignées par leur surface de marche**, ajout **murs pleins** (GEN_MurPlein) + **dalles de sol plates** (GEN_SolPlat, à texturer en asphalte). Détails complets : voir mémoire `constructeur-batiments.md`.
+
+**Reste à faire (ordre) :** 1) le user finit son niveau → 2) **écrire le script Unity qui rejoue `niveau.json` avec les vrais prefabs Synty** (pont vers le Quest) · 3) 2 véhicules mal orientés (Supercar, Juice_Cart) · 4) 33 perso/véhicules assemblés manquants · 5) 74 pièces couleurs approximatives · 6) reprise portage Unity natif (perso qui court OK, scintillement réglé ; restait feet groundY + anim Running).
+
+**Pour REPRENDRE, dis-moi :** « on reprend le constructeur » (je relance le serveur 8899) — puis soit tu continues à construire, soit « fais le script Unity pour importer mon niveau.json ».
+
+---
+
+## 🔖 REPRISE DE SESSION — LIRE EN PREMIER (jeu WebXR)
 
 **Où on en est (dernière session) :**
 - ✅ Jeu complet et jouable : vol fantôme 6DOF, cristaux, bulle au souffle (micro), jardinage, portail téléporteur, papillons, herbe animée, 2 maisons, champignons amanites qui dandinent.

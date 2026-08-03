@@ -101,7 +101,7 @@ scene.fog = new THREE.Fog(0xbfe0f6, 210, 680);   // portée étendue → les cha
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.xr.enabled = true;   // WebXR : runner jouable en VR sur le casque
-try { renderer.xr.setFramebufferScaleFactor(0.85); } catch (e) {}   // sous-résolution → PRIORITÉ 72 img/s (sinon réprojection = flou en mouvement)
+try { renderer.xr.setFramebufferScaleFactor(1.3); } catch (e) {}   // netteté (valeur d'origine) — le culling ajouté depuis paie la facture. Rebaisser à 1.0 si ça ne tient pas 72 img/s
 document.body.appendChild(renderer.domElement);
 const vrBtn = VRButton.createButton(renderer); vrBtn.style.zIndex = 70; document.body.appendChild(vrBtn);   // bouton « Enter VR » (visible sur le Quest)
 const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();   // filtrage anisotrope max → textures nettes même de biais (rue qui fuit)
@@ -358,7 +358,10 @@ const SYN_MOB = {
   syn_chair:    { label: 'Chaise', file: 'SM_Prop_Chair_01', foot: 1.2 },
   syn_jumelles: { label: 'Jumelles', file: 'SM_Prop_Binoculars_01', foot: 1.5 },
 };
-const SYNTY_SETS = [SYN_ROUTES, SYN_IMM, SYN_PLAGE, SYN_VEH, SYN_MOB];
+// Palm City DÉSACTIVÉ : les 20 GLB embarquaient chacun une copie du même atlas 4096 (≈1 Go de VRAM
+// pour 12 copies identiques) alors que la carte n'utilisait que 3 tuiles de route. Les définitions
+// SYN_* ci-dessus sont conservées : remettre les sets dans ce tableau suffit à tout réactiver.
+const SYNTY_SETS = [];
 function isSynty(t) { return SYNTY_SETS.some(s => s[t]); }
 function syntyDef(t) { for (const s of SYNTY_SETS) if (s[t]) return s[t]; return null; }
 // découpe un mesh fusionné en N îlots le long de X (objets alignés espacés) → N géométries recentrées et posées au sol
@@ -625,17 +628,12 @@ addEventListener('keydown', (e) => { if ((e.key === 'r' || e.key === 'R') && !pl
 // ---------- UI : palette en rubriques repliables ----------
 const pal = document.getElementById('pal');
 const CATS = [
-  { name: '🛣️ Palm City — Routes & pontons', items: SYN_ROUTES, open: true },
-  { name: '🏪 Palm City — Immeubles', items: SYN_IMM, open: false },
-  { name: '🌴 Palm City — Plage & nature', items: SYN_PLAGE, open: false },
-  { name: '🚗 Palm City — Véhicules', items: SYN_VEH, open: false },
-  { name: '🪑 Palm City — Mobilier', items: SYN_MOB, open: false },
-  { name: '🛣️ (Ancien) Routes', items: TILES, open: false },
-  { name: '🏠 (Ancien) Maisons', items: HOUSES, open: false },
-  { name: '🏢 (Ancien) Immeubles', items: BUILDINGS, open: false },
-  { name: '🏘️ (Ancien) Immeubles de rue', items: ROWB, open: false },
-  { name: '🪑 (Ancien) Mobilier', items: STREET, open: false },
-  { name: '🌿 (Ancien) Déco', items: DECO, open: false },
+  { name: '🛣️ Routes', items: TILES, open: true },
+  { name: '🏠 Maisons', items: HOUSES, open: false },
+  { name: '🏢 Immeubles', items: BUILDINGS, open: false },
+  { name: '🏘️ Immeubles de rue', items: ROWB, open: false },
+  { name: '🪑 Mobilier', items: STREET, open: false },
+  { name: '🌿 Déco', items: DECO, open: false },
 ];
 for (const cat of CATS) {
   const wrap = document.createElement('div'); wrap.className = 'cat' + (cat.open ? ' open' : '');
@@ -1039,7 +1037,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   runAxis = road.axis; runFixed = road.fixed * T; runStart = road.a * T - T / 2 + 4; runEnd = road.b * T + T / 2;
   runP = runStart; runLane = 0; runY = 0; runVY = 0;
   dolly.add(cam3); ctr3.enabled = false; vignette.visible = true; if (hero) hero.visible = true;   // 3e personne : on suit le perso
-  try { renderer.xr.setFoveation(0.6); } catch (e) {}   // flou périphérique fort → gros gain de perf (le centre reste net)
+  try { renderer.xr.setFoveation(0); } catch (e) {}   // aucune dégradation périphérique (valeur d'origine) — remonter à 0.25 si ça rame
   vrReady = true;
 });
 renderer.xr.addEventListener('sessionend', () => {
