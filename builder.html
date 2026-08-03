@@ -80,8 +80,9 @@
 </div>
 <div id="hud">Posés : <b id="count">0</b> · clic gauche = poser · clic droit = effacer · molette = zoom · R = tourner · <b>Ctrl+Z = annuler</b></div>
 <div id="playHud" style="display:none;position:fixed;top:10px;left:10px;z-index:60;background:rgba(12,22,42,.92);color:#dff;padding:10px 14px;border-radius:10px;font:13px sans-serif;border:2px solid #6fd">
-  🏃 Le perso court tout seul ! <b>← →</b> (ou Q/D) = changer de voie · <b>Espace / ↑</b> = sauter<br>
-  🖱️ <b>Glisser la souris</b> = tourner la caméra (regarde les montagnes en courant) · <b>C</b> = revenir derrière le perso<br>
+  🚶 <b>ZQSD / WASD / flèches</b> = te déplacer où tu veux · <b>Maj</b> = courir · <b>Espace</b> = sauter<br>
+  🖱️ <b>Glisser la souris</b> = tourner la caméra (on avance dans la direction du regard) · <b>C</b> = revenir derrière le perso<br>
+  🥽 En VR : <b>stick gauche</b> = se déplacer · <b>stick droit</b> = pivoter · <b>gâchette / A / B</b> = sauter<br>
   <button id="playExit" style="margin-top:8px;padding:8px 16px;border:0;border-radius:6px;background:#d6553f;color:#fff;font-weight:bold;cursor:pointer">← Retour éditeur</button>
 </div>
 <div id="toast"></div>
@@ -1026,8 +1027,15 @@ trainSel.onchange = () => { curTrain = trainSel.value; rebuildTrains(); schedule
 
 // ---------- MODE JEU : RUNNER (Subway Surfers) sur la route construite ----------
 let playMode = false, hero = null, heroMix = null, heroFoot = 0;
-let runAxis = 'x', runP = 0, runFixed = 0, runStart = 0, runEnd = 0, runLane = 0, runVY = 0, runY = 0;
-const RUN_SPEED = 13, LANE_W = 2, JUMP_V = 9.5, GRAV = 26;
+// ---------- Mode Jeu : DÉPLACEMENT LIBRE ----------
+// (avant : runner sur rail, le perso avançait tout seul sur la plus longue route
+// et ne pouvait que changer de voie. Remplacé par une marche libre : on va où on veut.)
+let runVY = 0, runY = 0;          // saut : vitesse verticale + hauteur
+let heroYaw = 0;                  // orientation du perso (rotation.y)
+const WALK_SPEED = 7.5, SPRINT_SPEED = 14, JUMP_V = 9.5, GRAV = 26, TURN_SPEED = 2.4;
+const keysDown = new Set();
+addEventListener('keyup', (e) => keysDown.delete(e.key.toLowerCase()));
+addEventListener('blur', () => keysDown.clear());   // sinon une touche reste « enfoncée » si on change d'onglet
 function findRunRoad() {   // trouve la plus longue route droite (horizontale ou verticale) pour y faire courir le perso
   const H = {}, V = {};
   for (const [k, e] of grid) if (e.type === 'route' || e.type === 'passage' || e.type === 'carrefour') {
@@ -1057,23 +1065,77 @@ function togglePlay(on) {
   const abort = () => { playMode = false; document.getElementById('panel').style.display = ''; document.getElementById('hud').style.display = ''; document.getElementById('playHud').style.display = 'none'; ctr3.enabled = (cam === cam3); };
   if (on) {
     cam = cam3; if (!hero) { toast('⏳ Perso en cours de chargement…'); abort(); return; }
+    // Plus besoin de route : on apparaît sur la plus longue s'il y en a une, sinon
+    // au centre de ce qui est construit, sinon à l'origine. On marche où on veut.
     const road = findRunRoad();
-    if (!road) { toast('🛣️ Construis une route d\'abord (le perso court dessus) !', 3500); abort(); return; }
-    runAxis = road.axis; runFixed = road.fixed * T; runStart = road.a * T - T / 2 + 4; runEnd = road.b * T + T / 2; runP = runStart; runLane = 0; runY = 0; runVY = 0;
+    let sx = 0, sz = 0;
+    if (road) {
+      if (road.axis === 'x') { sx = road.a * T - T / 2 + 4; sz = road.fixed * T; }
+      else { sz = road.a * T - T / 2 + 4; sx = road.fixed * T; }
+      heroYaw = road.axis === 'x' ? Math.PI / 2 : 0;
+    } else {
+      const all = [...grid.values(), ...objects.values(), ...halfTiles.values()];
+      if (all.length) { for (const e of all) { sx += e.mesh.position.x; sz += e.mesh.position.z; } sx /= all.length; sz /= all.length; }
+      heroYaw = 0;
+    }
+    runY = 0; runVY = 0;
+    hero.position.set(sx, heroFoot, sz); hero.rotation.y = heroYaw;
     camYaw = 0; camPitch = 0;   // caméra derrière le perso au démarrage
+    keysDown.clear();
     hero.visible = true;
-  } else { if (hero) hero.visible = false; ctr = cam === cam3 ? ctr3 : ctr2; if (cam === cam3) ctr3.enabled = true; }
+    toast('🚶 Déplacement libre : ZQSD / WASD / flèches · Maj = courir · Espace = sauter', 4200);
+  } else {
+    if (hero) hero.visible = false;
+    keysDown.clear();
+    // le culling du mode Jeu masque ce qui est loin du perso : tout ré-afficher en sortant
+    for (const e of objects.values()) e.mesh.visible = true;
+    for (const e of grid.values()) e.mesh.visible = true;
+    for (const e of halfTiles.values()) e.mesh.visible = true;
+    ctr = cam === cam3 ? ctr3 : ctr2; if (cam === cam3) ctr3.enabled = true;
+  }
 }
 document.getElementById('play').onclick = () => togglePlay(true);
 document.getElementById('playExit').onclick = () => togglePlay(false);
-addEventListener('keydown', (e) => {   // RUNNER : ← → = changer de voie, Espace/↑ = sauter
-  if (!playMode || e.repeat) return;
+addEventListener('keydown', (e) => {   // MARCHE LIBRE : ZQSD/WASD/flèches = se déplacer, Maj = courir, Espace = sauter
+  if (!playMode) return;
   const k = e.key.toLowerCase();
-  if (k === 'q' || k === 'a' || k === 'arrowleft') runLane = Math.max(-1, runLane - 1);
-  else if (k === 'd' || k === 'arrowright') runLane = Math.min(1, runLane + 1);
-  else if (k === ' ' || k === 'arrowup' || k === 'z' || k === 'w') { if (runY <= 0.02) runVY = JUMP_V; }
-  else if (k === 'c') { camYaw = 0; camPitch = 0; }   // recentrer la caméra derrière le perso
+  keysDown.add(k);
+  if (e.repeat) return;
+  if (k === ' ') { if (runY <= 0.02) runVY = JUMP_V; e.preventDefault(); }   // (sinon la barre d'espace scrolle la page)
+  else if (k === 'c') { camYaw = 0; camPitch = 0; }                          // recentrer la caméra derrière le perso
 });
+// Intention de déplacement au clavier, dans le repère de la CAMÉRA (avant = là où on regarde).
+// AZERTY et QWERTY ensemble : Z/W = avant, S = arrière, Q/A = gauche, D = droite.
+function readKeys() {
+  const k = (s) => keysDown.has(s);
+  let mx = 0, mz = 0;
+  if (k('z') || k('w') || k('arrowup')) mz += 1;
+  if (k('s') || k('arrowdown')) mz -= 1;
+  if (k('q') || k('a') || k('arrowleft')) mx -= 1;
+  if (k('d') || k('arrowright')) mx += 1;
+  return { mx, mz, sprint: k('shift') };
+}
+// Déplace le perso selon une intention (mx = latéral, mz = avant) exprimée autour de
+// l'angle `theta` (direction « avant »). Gère le saut, l'orientation et la hauteur au sol.
+function stepHero(dt, mx, mz, theta, sprint) {
+  const len = Math.hypot(mx, mz);
+  if (len > 0.02) {
+    const fx = Math.sin(theta), fz = Math.cos(theta);          // avant
+    const rx = fz, rz = -fx;                                   // droite (avant x haut)
+    let dx = fx * mz + rx * mx, dz = fz * mz + rz * mx;
+    const n = Math.hypot(dx, dz) || 1; dx /= n; dz /= n;
+    const sp = (sprint ? SPRINT_SPEED : WALK_SPEED) * Math.min(1, len);
+    hero.position.x += dx * sp * dt;
+    hero.position.z += dz * sp * dt;
+    const want = Math.atan2(dx, dz);                           // le perso regarde où il va
+    let d = ((want - heroYaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+    heroYaw += d * Math.min(1, dt * 12);
+    hero.rotation.y = heroYaw;
+  }
+  if (runVY !== 0 || runY > 0) { runVY -= GRAV * dt; runY += runVY * dt; if (runY <= 0) { runY = 0; runVY = 0; } }
+  hero.position.y = heroFoot + runY;
+  return len > 0.02;
+}
 // caméra libre en mode Jeu (glisser la souris) → permet de regarder les montagnes de côté et voir la parallaxe sans casque
 let camYaw = 0, camPitch = 0, camDrag = null;
 renderer.domElement.addEventListener('pointerdown', (e) => { if (!playMode) return; camDrag = { x: e.clientX, y: e.clientY }; try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {} });
@@ -1093,13 +1155,24 @@ const vignette = (() => {
   m.position.z = -1; m.renderOrder = 999; m.frustumCulled = false; m.visible = false; return m;
 })();
 cam3.add(vignette);
-let vrReady = false, laneReady = true, jumpReady = true;
+let vrReady = false, jumpReady = true;
 renderer.xr.addEventListener('sessionstart', () => {
+  if (!hero) { toast('⏳ Perso en cours de chargement…'); vrReady = false; return; }
+  // Plus besoin de route : on apparaît sur la plus longue s'il y en a une, sinon au
+  // centre de ce qui est construit. Ensuite on marche librement.
   const road = findRunRoad();
-  if (!road) { toast('🛣️ Construis une route d\'abord !'); vrReady = false; return; }
-  runAxis = road.axis; runFixed = road.fixed * T; runStart = road.a * T - T / 2 + 4; runEnd = road.b * T + T / 2;
-  runP = runStart; runLane = 0; runY = 0; runVY = 0;
-  dolly.add(cam3); ctr3.enabled = false; vignette.visible = true; if (hero) hero.visible = true;   // 3e personne : on suit le perso
+  let sx = 0, sz = 0;
+  if (road) {
+    if (road.axis === 'x') { sx = road.a * T - T / 2 + 4; sz = road.fixed * T; heroYaw = Math.PI / 2; }
+    else { sz = road.a * T - T / 2 + 4; sx = road.fixed * T; heroYaw = 0; }
+  } else {
+    const all = [...grid.values(), ...objects.values(), ...halfTiles.values()];
+    if (all.length) { for (const e of all) { sx += e.mesh.position.x; sz += e.mesh.position.z; } sx /= all.length; sz /= all.length; }
+    heroYaw = 0;
+  }
+  runY = 0; runVY = 0;
+  hero.position.set(sx, heroFoot, sz); hero.rotation.y = heroYaw;
+  dolly.add(cam3); ctr3.enabled = false; vignette.visible = true; hero.visible = true;   // 3e personne : on suit le perso
   try { renderer.xr.setFoveation(0); } catch (e) {}   // aucune dégradation périphérique (valeur d'origine) — remonter à 0.25 si ça rame
   vrReady = true;
 });
@@ -1108,16 +1181,22 @@ renderer.xr.addEventListener('sessionend', () => {
   ctr3.enabled = (cam === cam3); vignette.visible = false;
   for (const e of objects.values()) e.mesh.visible = true; for (const e of grid.values()) e.mesh.visible = true; for (const e of halfTiles.values()) e.mesh.visible = true;   // ré-affiche tout ce que le culling avait masqué
 });
+// Stick GAUCHE = se déplacer (avant/arrière + pas de côté), stick DROIT = pivoter,
+// gâchette ou A/B = sauter. Le stick droit tourne le perso, et la caméra le suit.
 function readVRInput() {
-  const session = renderer.xr.getSession(); if (!session) return;
-  let ax = 0, jump = false;
+  const session = renderer.xr.getSession(); if (!session) return { mx: 0, mz: 0, turn: 0 };
+  let mx = 0, mz = 0, turn = 0, jump = false;
   for (const src of session.inputSources) {
     const gp = src.gamepad; if (!gp) continue;
-    if (gp.axes.length >= 4) ax += gp.axes[2] || 0; if (gp.axes.length >= 2) ax += gp.axes[0] || 0;   // joystick horizontal (selon la manette)
-    for (let bi = 0; bi < gp.buttons.length; bi++) if ((bi === 0 || bi === 4 || bi === 5) && gp.buttons[bi].pressed) jump = true;   // gâchette ou boutons A/B → sauter
+    const ax = gp.axes.length >= 4 ? (gp.axes[2] || 0) : (gp.axes[0] || 0);   // selon la manette, le stick est en 0/1 ou 2/3
+    const ay = gp.axes.length >= 4 ? (gp.axes[3] || 0) : (gp.axes[1] || 0);
+    const dead = (v) => Math.abs(v) < 0.15 ? 0 : v;
+    if (src.handedness === 'right') turn += dead(ax);
+    else { mx += dead(ax); mz += -dead(ay); }                                 // axe Y du stick : vers l'avant = négatif
+    for (let bi = 0; bi < gp.buttons.length; bi++) if ((bi === 0 || bi === 4 || bi === 5) && gp.buttons[bi].pressed) jump = true;
   }
-  if (Math.abs(ax) < 0.35) laneReady = true; else if (laneReady) { runLane = Math.max(-1, Math.min(1, runLane + (ax > 0 ? 1 : -1))); laneReady = false; }
   if (!jump) jumpReady = true; else if (jumpReady && runY <= 0.02) { runVY = JUMP_V; jumpReady = false; }
+  return { mx, mz, turn };
 }
 const VR_BACK = 6, VR_UP = 1.5;   // caméra : recul derrière le perso + élévation (vue « Subway » un peu plongeante)
 const CULL_OBJ2 = 55 * 55, CULL_TILE2 = 95 * 95;   // couloir serré : objets lourds masqués au-delà de 55, tuiles au-delà de 95 (priorité fluidité)
@@ -1127,21 +1206,16 @@ function cullRunner(px, pz) {
   for (const e of halfTiles.values()) { const dx = e.mesh.position.x - px, dz = e.mesh.position.z - pz; e.mesh.visible = (dx * dx + dz * dz) < CULL_TILE2; }
 }
 function updateVRRunner(dt) {
-  if (!vrReady) return;
-  readVRInput();
-  runP += RUN_SPEED * dt; if (runP > runEnd + 6) runP = runStart;   // course auto + boucle
-  if (runVY !== 0 || runY > 0) { runVY -= GRAV * dt; runY += runVY * dt; if (runY <= 0) { runY = 0; runVY = 0; } }   // saut
-  const cross = runFixed + runLane * LANE_W, lerp = Math.min(1, dt * 14);
-  if (runAxis === 'x') {
-    if (hero) { hero.position.x = runP; hero.position.z += (cross - hero.position.z) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = Math.PI / 2; }
-    const hz = hero ? hero.position.z : cross;
-    dolly.position.set(runP - VR_BACK, runY + VR_UP, hz); dolly.rotation.y = -Math.PI / 2;   // rig derrière le perso, face à +x
-  } else {
-    if (hero) { hero.position.z = runP; hero.position.x += (cross - hero.position.x) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = 0; }
-    const hx = hero ? hero.position.x : cross;
-    dolly.position.set(hx, runY + VR_UP, runP - VR_BACK); dolly.rotation.y = Math.PI;   // rig derrière le perso, face à +z
-  }
-  if (hero && heroMix) heroMix.update(dt);
+  if (!vrReady || !hero) return;
+  const inp = readVRInput();
+  if (inp.turn) heroYaw -= inp.turn * TURN_SPEED * dt;               // stick droit : on pivote
+  const moving = stepHero(dt, inp.mx, inp.mz, heroYaw, false);       // déplacement relatif à l'orientation du perso
+  if (!moving) hero.rotation.y = heroYaw;                            // pivoter sur place doit tourner le perso aussi
+  // Rig joueur placé DERRIÈRE le perso, tourné dans le même sens (le casque gère la vue).
+  const fx = Math.sin(heroYaw), fz = Math.cos(heroYaw);
+  dolly.position.set(hero.position.x - fx * VR_BACK, runY + VR_UP, hero.position.z - fz * VR_BACK);
+  dolly.rotation.y = heroYaw + Math.PI;
+  if (heroMix) heroMix.update(dt);
   cullRunner(dolly.position.x, dolly.position.z);   // masque les objets lointains → fluidité
 }
 
@@ -1149,7 +1223,8 @@ function updateVRRunner(dt) {
 window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, rebuildTrains, TRAIN_ASSET, getTrains: () => trains, setTrain: (t) => { curTrain = t; rebuildTrains(); }, togglePlay,
   placeHalfXZ: (x, z, type, rot) => { const sx = Math.round(x / HG) * HG, sz = Math.round(z / HG) * HG, k = sx + '_' + sz; const m = ASSET[type].clone(true); m.position.set(sx, 0, sz); m.rotation.y = (rot || 0) * Math.PI / 2; worldGroup.add(m); halfTiles.set(k, { type, x: sx, z: sz, rot: rot || 0, mesh: m }); },
   barrierInfo: () => ({ armLoaded: !!BARRIER_ARM, count: barriers.length, sample: barriers[0] ? { px: barriers[0].px, pz: barriers[0].pz, angle: +barriers[0].angle.toFixed(2), gpos: barriers[0].group.position.toArray().map(v => +v.toFixed(1)) } : null }),
-  clearSilent: () => { clearAllSilent(); scheduleTrains(); refresh(); }, scene, getBlimp: () => blimp };
+  clearSilent: () => { clearAllSilent(); scheduleTrains(); refresh(); }, scene, getBlimp: () => blimp,
+  getHero: () => hero, heroPos: () => hero ? [hero.position.x, hero.position.y, hero.position.z] : null };
 
 // ---------- Boucle ----------
 let _lt = 0;
@@ -1178,18 +1253,17 @@ renderer.setAnimationLoop((t) => {
   if (renderer.xr.isPresenting) {
     updateVRRunner(dt);                                               // RUNNER VR (casque) : on déplace le rig joueur, le casque gère la vue
   } else if (playMode && hero) {
-    runP += RUN_SPEED * dt;                                            // course automatique vers l'avant
-    if (runP > runEnd + 6) runP = runStart;                            // boucle (endless en attendant les obstacles)
-    if (runVY !== 0 || runY > 0) { runVY -= GRAV * dt; runY += runVY * dt; if (runY <= 0) { runY = 0; runVY = 0; } }   // saut
-    const cross = runFixed + runLane * LANE_W, lerp = Math.min(1, dt * 14);
-    if (runAxis === 'x') { hero.position.x = runP; hero.position.z += (cross - hero.position.z) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = Math.PI / 2; }
-    else { hero.position.z = runP; hero.position.x += (cross - hero.position.x) * lerp; hero.position.y = heroFoot + runY; hero.rotation.y = 0; }
-    // caméra : par défaut derrière le perso, orbitable à la souris (camYaw) + hauteur (camPitch) → regarder les montagnes en courant
-    const theta0 = runAxis === 'x' ? Math.PI : -Math.PI / 2;   // direction « derrière » selon l'axe de course
-    const th = theta0 + camYaw, D = 9, eyeY = heroFoot + 1.6 + runY * 0.4;
-    cam3.position.set(hero.position.x + Math.cos(th) * D, eyeY + 3.9 + camPitch * 7, hero.position.z + Math.sin(th) * D);
+    // MARCHE LIBRE : on avance dans la direction où regarde la caméra (orbitable à la souris).
+    const kb = readKeys();
+    const camTheta = Math.PI + camYaw;                     // angle de la caméra autour du perso
+    const fwd = camTheta + Math.PI;                        // « avant » = à l'opposé de la caméra
+    const moving = stepHero(dt, kb.mx, kb.mz, fwd, kb.sprint);
+    if (!moving) hero.position.y = heroFoot + runY;        // immobile : on garde quand même la hauteur de saut
+    const D = 9, eyeY = heroFoot + 1.6 + runY * 0.4;
+    cam3.position.set(hero.position.x + Math.cos(camTheta) * D, eyeY + 3.9 + camPitch * 7, hero.position.z + Math.sin(camTheta) * D);
     cam3.lookAt(hero.position.x, eyeY, hero.position.z);
     if (heroMix) heroMix.update(dt);
+    cullRunner(hero.position.x, hero.position.z);          // le culling suit le perso, où qu'il aille
   } else ctr.update();
   renderer.render(scene, cam);
 });
