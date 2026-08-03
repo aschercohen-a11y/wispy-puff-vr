@@ -70,6 +70,7 @@
     <button id="view" class="act">🗺️ Vue 2D (plan)</button>
     <button id="fit" class="act">🔭 Voir tout</button>
     <button id="hills" class="act">⛰️ Collines (fond)</button>
+    <button id="litBtn" class="act">🌫️ Éclairage : plat</button>
     <button id="play" class="act" style="background:#3fbf5a;color:#fff;font-size:14px">🎮 Jouer dans mon monde</button>
   </div>
   <div class="grp">
@@ -546,7 +547,66 @@ function clearAll() { for (const e of grid.values()) worldGroup.remove(e.mesh); 
 
 // ---------- Grille de repère + fantôme ----------
 const gridHelper = new THREE.GridHelper(T * 40, 40, 0x88b0d0, 0x9ec4de); gridHelper.position.y = 0.001; gridHelper.material.opacity = 0.35; gridHelper.material.transparent = true; scene.add(gridHelper);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.0));   // (au cas où un asset resterait lit)
+// ---------- Éclairage optionnel (bouton ☀️) ----------
+// Le constructeur est unlit PAR CONCEPTION : couleurs strictement identiques d'une
+// tuile à l'autre, aucune différence de teinte due à l'orientation (c'est ce qui a
+// réglé les vieux bugs de raccord trottoir/route). Mais en VR la vision stéréo
+// attend du relief : sans ombrage, une face au soleil et une face à l'ombre ont la
+// même couleur et la ville se lit comme du carton découpé. D'où cette bascule.
+// MeshLambertMaterial et pas MeshStandardMaterial : le PBR coûte beaucoup plus cher
+// au pixel sur Quest pour un gain nul ici (aucune carte normal/roughness conservée).
+const hemi = new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.0);
+scene.add(hemi);
+// Soleil volontairement RASANT (composante Y faible) : ce sont les façades verticales
+// qu'on veut différencier, pas les toits. Et intensité modérée face à une ambiante
+// forte — le but est d'ajouter du relief SANS perdre l'éclat du mode plat.
+const sun = new THREE.DirectionalLight(0xfff2d8, 0.45);
+sun.position.set(0.62, 0.5, 0.34);
+scene.add(sun);
+
+let LIT = localStorage.getItem('wispy_lit') !== '0';   // ON par défaut ; le choix contraire est mémorisé
+const LIT_TWIN = new WeakMap(), FLAT_TWIN = new WeakMap();   // jumeau éclairé <-> jumeau plat
+function twinOf(src, lit) {
+  const cache = lit ? LIT_TWIN : FLAT_TWIN;
+  let t = cache.get(src);
+  if (!t) {
+    const C = lit ? THREE.MeshLambertMaterial : THREE.MeshBasicMaterial;
+    t = new C({
+      map: src.map || null,
+      color: src.color ? src.color.clone() : new THREE.Color(0xffffff),
+      side: src.side, transparent: src.transparent, opacity: src.opacity,
+      alphaTest: src.alphaTest, vertexColors: src.vertexColors,
+      depthWrite: src.depthWrite, depthTest: src.depthTest, wireframe: src.wireframe,
+    });
+    cache.set(src, t);
+    (lit ? FLAT_TWIN : LIT_TWIN).set(t, src);   // le retour est immédiat, rien n'est recréé
+  }
+  return t;
+}
+function applyLighting() {
+  // On n'éclaire QUE ce que l'utilisateur construit (worldGroup). Le décor de fond
+  // (bgGroup : collines et montagnes lointaines) doit rester plat : ce sont des
+  // silhouettes calibrées pour se fondre dans le brouillard, les ombrer les noircit.
+  worldGroup.traverse(o => {
+    if (!o.isMesh || !o.material || o.userData.noLight) return;
+    const conv = (m) => {
+      if (m.depthTest === false) return m;                    // vignette / HUD : jamais éclairés
+      return (!!m.isMeshLambertMaterial === LIT) ? m : twinOf(m, LIT);
+    };
+    o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
+  });
+  hemi.intensity = LIT ? 0.85 : 1.0;   // en mode plat les lumières sont ignorées de toute façon
+  sun.visible = LIT;
+  const b = document.getElementById('litBtn');
+  if (b) {
+    b.textContent = LIT ? '☀️ Éclairage : ON' : '🌫️ Éclairage : plat';
+    b.style.background = LIT ? '#f2a33c' : '';
+    b.style.color = LIT ? '#241000' : '';
+  }
+}
+function toggleLighting() { LIT = !LIT; try { localStorage.setItem('wispy_lit', LIT ? '1' : '0'); } catch (e) {} applyLighting(); }
+window.__setLighting = (v) => { LIT = !!v; applyLighting(); };   // pour tester sans cliquer
+LIGHTING_READY = true;   // déclaré en var plus bas : refresh() peut tourner avant ce bloc
 
 let ghost = null;
 function makeGhost() { if (ghost) { scene.remove(ghost); ghost = null; } const a = curType && assetOf(curType); if (!a) return; ghost = a.clone(true); ghost.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.5; o.material.depthWrite = false; } }); if (kindOf(curType) === 'object') ghost.scale.setScalar(scaleFor(curType)); scene.add(ghost); }
@@ -703,7 +763,8 @@ document.getElementById('fit').onclick = () => {   // recadre la caméra sur TOU
   else { cam2.position.set(c.x, 200, c.z); cam2.zoom = Math.min(cam2.right * 2 / (sz.x + 20), (cam2.top * 2) / (sz.z + 20)); cam2.updateProjectionMatrix(); ctr2.target.set(c.x, 0, c.z); ctr2.update(); }
 };
 document.getElementById('save').onclick = () => saveNow(true);
-function refresh() { document.getElementById('count').textContent = grid.size + objects.size + halfTiles.size; buildBg(); }
+var LIGHTING_READY;   // var (hoisté, donc lisible avant son affectation — un const léverait une erreur de zone morte)
+function refresh() { document.getElementById('count').textContent = grid.size + objects.size + halfTiles.size; buildBg(); if (LIGHTING_READY) applyLighting(); }   // les objets fraîchement posés sont clonés depuis des matériaux plats → on les remet au mode courant
 
 // ---------- Décor de fond : collines cartoon à l'horizon (comble les bords vides) ----------
 const bgGroup = new THREE.Group(); scene.add(bgGroup);
@@ -796,6 +857,8 @@ function buildBg() {
 }
 document.getElementById('hills').onclick = () => { hillsOn = !hillsOn; const b = document.getElementById('hills'); b.style.background = hillsOn ? '#7cbf5e' : ''; b.style.color = hillsOn ? '#023' : '#fff'; bgSig = ''; buildBg(); };
 document.getElementById('hills').style.background = '#7cbf5e'; document.getElementById('hills').style.color = '#023';
+document.getElementById('litBtn').onclick = toggleLighting;
+applyLighting();   // état initial (mémorisé dans localStorage)
 
 // ---------- Dirigeable pub « BURGO » qui orbite lentement au-dessus de la ville ----------
 let blimp = null, blimpA = 0;
