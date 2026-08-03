@@ -37,7 +37,7 @@
 </head>
 <body>
 <div id="panel">
-  <h3>🧱 Constructeur LEGO <span style="font-size:11px;font-weight:400;opacity:.75">v2026-08-03 · HD</span></h3>
+  <h3>🧱 Constructeur LEGO <span style="font-size:11px;font-weight:400;opacity:.75">build 7 · marche libre</span></h3>
   <small>Choisis une rubrique, clique un élément, puis clique sur la grille. Ça s'aimante tout seul.</small>
   <div id="pal"></div>
   <div class="grp">
@@ -82,7 +82,8 @@
 <div id="playHud" style="display:none;position:fixed;top:10px;left:10px;z-index:60;background:rgba(12,22,42,.92);color:#dff;padding:10px 14px;border-radius:10px;font:13px sans-serif;border:2px solid #6fd">
   🚶 <b>ZQSD / WASD / flèches</b> = te déplacer où tu veux · <b>Maj</b> = courir · <b>Espace</b> = sauter<br>
   🖱️ <b>Glisser la souris</b> = tourner la caméra (on avance dans la direction du regard) · <b>C</b> = revenir derrière le perso<br>
-  🥽 En VR : <b>stick gauche</b> = se déplacer · <b>stick droit</b> = pivoter · <b>gâchette / A / B</b> = sauter<br>
+  🥽 En VR : <b>stick gauche</b> = se déplacer · <b>stick droit</b> = pivoter · <b>A / B</b> = sauter<br>
+  <span style="opacity:.6;font-size:11px">build 7 — si tu ne vois pas ce numéro, ton navigateur sert une version en cache</span><br>
   <button id="playExit" style="margin-top:8px;padding:8px 16px;border:0;border-radius:6px;background:#d6553f;color:#fff;font-weight:bold;cursor:pointer">← Retour éditeur</button>
 </div>
 <div id="toast"></div>
@@ -1227,7 +1228,10 @@ function readVRInput() {
     const dead = (v) => Math.abs(v) < 0.15 ? 0 : v;
     if (src.handedness === 'right') turn += dead(ax);
     else { mx += dead(ax); mz += -dead(ay); }                                 // axe Y du stick : vers l'avant = négatif
-    for (let bi = 0; bi < gp.buttons.length; bi++) if ((bi === 0 || bi === 4 || bi === 5) && gp.buttons[bi].pressed) jump = true;
+    // Saut = A/B (ou X/Y) UNIQUEMENT. Surtout pas l'index 0 : c'est la GÂCHETTE, sur
+    // laquelle l'index repose naturellement — on sautait donc sans le vouloir, et la
+    // pose de saut (jambes repliees) donne un perso accroupi qui ne marche pas.
+    for (let bi = 4; bi <= 5; bi++) if (gp.buttons[bi] && gp.buttons[bi].pressed) jump = true;
   }
   if (!jump) jumpReady = true; else if (jumpReady && runY <= 0.02) { runVY = JUMP_V; jumpReady = false; }
   return { mx, mz, turn };
