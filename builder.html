@@ -1154,7 +1154,7 @@ function stepHero(dt, mx, mz, theta, sprint) {
   const len = Math.hypot(mx, mz);
   if (len > 0.02) {
     const fx = Math.sin(theta), fz = Math.cos(theta);          // avant
-    const rx = fz, rz = -fx;                                   // droite (avant x haut)
+    const rx = -fz, rz = fx;                                   // droite = avant × haut (le contraire donne la GAUCHE)
     let dx = fx * mz + rx * mx, dz = fz * mz + rz * mx;
     const n = Math.hypot(dx, dz) || 1; dx /= n; dz /= n;
     const sp = (sprint ? SPRINT_SPEED : WALK_SPEED) * Math.min(1, len);
@@ -1295,14 +1295,16 @@ renderer.setAnimationLoop((t) => {
     updateVRRunner(dt);                                               // RUNNER VR (casque) : on déplace le rig joueur, le casque gère la vue
   } else if (playMode && hero) {
     // MARCHE LIBRE : on avance dans la direction où regarde la caméra (orbitable à la souris).
+    // Une SEULE convention d'angle partout : cap θ → avant = (sin θ, cos θ), comme
+    // rotation.y de three.js. La caméra était posée en (cos θ, sin θ), une convention
+    // symétrique de l'autre : l'axe d'avance s'en trouvait faussé.
     const kb = readKeys();
-    const camTheta = Math.PI + camYaw;                     // angle de la caméra autour du perso
-    const fwd = camTheta + Math.PI;                        // « avant » = à l'opposé de la caméra
-    const moving = stepHero(dt, kb.mx, kb.mz, fwd, kb.sprint);
+    const viewYaw = camYaw;                                // cap de la vue (souris)
+    const moving = stepHero(dt, kb.mx, kb.mz, viewYaw, kb.sprint);
     if (!moving) hero.position.y = heroFoot + runY;        // immobile : on garde quand même la hauteur de saut
     heroAnim(dt, moving, kb.sprint, runY > 0.05);          // idle / marche / course / saut
     const D = 9, eyeY = heroFoot + 1.6 + runY * 0.4;
-    cam3.position.set(hero.position.x + Math.cos(camTheta) * D, eyeY + 3.9 + camPitch * 7, hero.position.z + Math.sin(camTheta) * D);
+    cam3.position.set(hero.position.x - Math.sin(viewYaw) * D, eyeY + 3.9 + camPitch * 7, hero.position.z - Math.cos(viewYaw) * D);   // caméra DERRIÈRE = à l'opposé de l'avant
     cam3.lookAt(hero.position.x, eyeY, hero.position.z);
     cullRunner(hero.position.x, hero.position.z);          // le culling suit le perso, où qu'il aille
   } else ctr.update();
