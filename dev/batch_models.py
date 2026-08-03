@@ -38,8 +38,14 @@ JOBS = {
     "house2":          ("Maison2",             25000, 2048),
     "house_bakery":    ("Boulangerie",         35000, 2048),
     "windmill":        ("Moulin",              25000, 2048),
-    "row_grand":       ("3 grande immeuble",   45000, 2048),
-    "row_petit":       ("3 Petit immeuble",    35000, 2048),
+    # 4096 et pas 2048 : ces deux GLB contiennent TROIS boutiques chacun qui partagent
+    # un seul atlas. Chaque boutique ne dispose donc que d'un tiers de la texture, et
+    # c'est sur elles que se trouvent les enseignes (Bakery, Market, Flowers...). A
+    # 2048 chaque boutique tombait a ~680 px de large : dans le casque les lettres se
+    # fondaient dans le fond et disparaissaient. Ce sont les seuls modeles dont
+    # l original est en 4096 — partout ailleurs 2048 est deja le maximum disponible.
+    "row_grand":       ("3 grande immeuble",   45000, 4096),
+    "row_petit":       ("3 Petit immeuble",    35000, 4096),
     "wheel":           ("grande roue",         30000, 2048),
     # petits objets ou objets répétés : budget serré, 1024 suffit
     "wsupport":        ("supprt grand roue",    8000, 1024),
