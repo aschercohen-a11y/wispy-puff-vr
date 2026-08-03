@@ -1031,7 +1031,8 @@ let playMode = false, hero = null, heroMix = null, heroFoot = 0;
 // (avant : runner sur rail, le perso avançait tout seul sur la plus longue route
 // et ne pouvait que changer de voie. Remplacé par une marche libre : on va où on veut.)
 let runVY = 0, runY = 0;          // saut : vitesse verticale + hauteur
-let heroYaw = 0;                  // orientation du perso (rotation.y)
+let heroYaw = 0;                  // orientation VISUELLE du perso (rotation.y) — ne sert jamais de repère de déplacement
+let vrYaw = 0;                    // orientation de la vue en VR (stick droit) — c'est ELLE le repère de déplacement
 const WALK_SPEED = 7.5, SPRINT_SPEED = 14, JUMP_V = 9.5, GRAV = 26, TURN_SPEED = 2.4;
 const keysDown = new Set();
 addEventListener('keyup', (e) => keysDown.delete(e.key.toLowerCase()));
@@ -1172,6 +1173,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   }
   runY = 0; runVY = 0;
   hero.position.set(sx, heroFoot, sz); hero.rotation.y = heroYaw;
+  vrYaw = heroYaw;   // la vue démarre dans l'axe du perso
   dolly.add(cam3); ctr3.enabled = false; vignette.visible = true; hero.visible = true;   // 3e personne : on suit le perso
   try { renderer.xr.setFoveation(0); } catch (e) {}   // aucune dégradation périphérique (valeur d'origine) — remonter à 0.25 si ça rame
   vrReady = true;
@@ -1208,13 +1210,18 @@ function cullRunner(px, pz) {
 function updateVRRunner(dt) {
   if (!vrReady || !hero) return;
   const inp = readVRInput();
-  if (inp.turn) heroYaw -= inp.turn * TURN_SPEED * dt;               // stick droit : on pivote
-  const moving = stepHero(dt, inp.mx, inp.mz, heroYaw, false);       // déplacement relatif à l'orientation du perso
-  if (!moving) hero.rotation.y = heroYaw;                            // pivoter sur place doit tourner le perso aussi
-  // Rig joueur placé DERRIÈRE le perso, tourné dans le même sens (le casque gère la vue).
-  const fx = Math.sin(heroYaw), fz = Math.cos(heroYaw);
+  // ⚠️ Le déplacement est relatif à vrYaw (la CAMÉRA), jamais à l'orientation du perso.
+  // Sinon boucle de rétroaction : pousser à droite fait pivoter le perso vers la droite,
+  // ce qui redéfinit « la droite », qui le fait repivoter → on tourne en spirale au lieu
+  // d'aller tout droit. Seul le stick droit change vrYaw. Le perso, lui, se contente de
+  // s'orienter visuellement vers là où il marche (purement cosmétique, sans effet retour).
+  if (inp.turn) vrYaw -= inp.turn * TURN_SPEED * dt;                 // stick droit : on pivote la vue
+  stepHero(dt, inp.mx, inp.mz, vrYaw, false);
+  // Rig joueur placé DERRIÈRE la direction de vue (et non derrière le perso, qui peut
+  // marcher de côté ou à reculons sans que la caméra parte avec lui).
+  const fx = Math.sin(vrYaw), fz = Math.cos(vrYaw);
   dolly.position.set(hero.position.x - fx * VR_BACK, runY + VR_UP, hero.position.z - fz * VR_BACK);
-  dolly.rotation.y = heroYaw + Math.PI;
+  dolly.rotation.y = vrYaw + Math.PI;
   if (heroMix) heroMix.update(dt);
   cullRunner(dolly.position.x, dolly.position.z);   // masque les objets lointains → fluidité
 }
