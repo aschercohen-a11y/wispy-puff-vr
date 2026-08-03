@@ -37,7 +37,7 @@
 </head>
 <body>
 <div id="panel">
-  <h3>🧱 Constructeur LEGO <span style="font-size:11px;font-weight:400;opacity:.75">build 9 · enseignes 4096</span></h3>
+  <h3>🧱 Constructeur LEGO <span style="font-size:11px;font-weight:400;opacity:.75">build 10 · sonde VR</span></h3>
   <small>Choisis une rubrique, clique un élément, puis clique sur la grille. Ça s'aimante tout seul.</small>
   <div id="pal"></div>
   <div class="grp">
@@ -78,6 +78,7 @@
         <span id="fbVal" style="flex:1;text-align:center;font-weight:bold">1.6</span>
         <button id="fbUp" class="act" style="flex:0 0 42px">➕</button>
       </div>
+      <button id="probeBtn" class="act" style="margin-top:6px">🔎 Sonde VR : off</button>
     </div>
     <button id="play" class="act" style="background:#3fbf5a;color:#fff;font-size:14px">🎮 Jouer dans mon monde</button>
   </div>
@@ -91,7 +92,7 @@
   🚶 <b>ZQSD / WASD / flèches</b> = te déplacer où tu veux · <b>Maj</b> = courir · <b>Espace</b> = sauter<br>
   🖱️ <b>Glisser la souris</b> = tourner la caméra (on avance dans la direction du regard) · <b>C</b> = revenir derrière le perso<br>
   🥽 En VR : <b>stick gauche</b> = se déplacer · <b>stick droit</b> = pivoter · <b>A / B</b> = sauter<br>
-  <span style="opacity:.6;font-size:11px">build 9 — si tu ne vois pas ce numéro, ton navigateur sert une version en cache</span><br>
+  <span style="opacity:.6;font-size:11px">build 10 — si tu ne vois pas ce numéro, ton navigateur sert une version en cache</span><br>
   <button id="playExit" style="margin-top:8px;padding:8px 16px;border:0;border-radius:6px;background:#d6553f;color:#fff;font-weight:bold;cursor:pointer">← Retour éditeur</button>
 </div>
 <div id="toast"></div>
@@ -118,6 +119,10 @@ renderer.xr.enabled = true;   // WebXR : runner jouable en VR sur le casque
 // environ deux fois moins de pixels qu'à l'écran — d'où un besoin de suréchantillonner.
 // ⚠️ Doit être appliqué AVANT le démarrage de la session : three.js s'en sert pour
 // dimensionner le XRWebGLLayer, le changer pendant une session n'a aucun effet.
+// (déclaré ici avec les autres réglages : refreshProbeBtn() s'exécute bien avant le
+// bloc de la sonde, et un `let` lu avant son initialisation lève une erreur de zone
+// morte temporelle qui casse tout le script — window.__builder disparaissait.)
+let PROBE_ON = localStorage.getItem('wispy_probe') === '1';
 let FB_SCALE = parseFloat(localStorage.getItem('wispy_fbscale') || '1.6');
 if (!(FB_SCALE > 0.5 && FB_SCALE < 3)) FB_SCALE = 1.6;
 function applyFbScale() {
@@ -889,6 +894,17 @@ function bumpFb(d) {
 }
 document.getElementById('fbUp').onclick = () => bumpFb(+0.2);
 document.getElementById('fbDown').onclick = () => bumpFb(-0.2);
+function refreshProbeBtn() {
+  const b = document.getElementById('probeBtn');
+  b.textContent = PROBE_ON ? '🔎 Sonde VR : ON' : '🔎 Sonde VR : off';
+  b.style.background = PROBE_ON ? '#f2a33c' : ''; b.style.color = PROBE_ON ? '#241000' : '';
+}
+document.getElementById('probeBtn').onclick = () => {
+  PROBE_ON = !PROBE_ON;
+  try { localStorage.setItem('wispy_probe', PROBE_ON ? '1' : '0'); } catch (e) {}
+  refreshProbeBtn();
+};
+refreshProbeBtn();
 applyFbScale();   // met aussi à jour l'affichage une fois le DOM prêt
 
 // ---------- Dirigeable pub « BURGO » qui orbite lentement au-dessus de la ville ----------
@@ -1218,6 +1234,53 @@ const vignette = (() => {
   m.position.z = -1; m.renderOrder = 999; m.frustumCulled = false; m.visible = false; return m;
 })();
 cam3.add(vignette);
+
+// ---------- Sonde VR (bouton 🔎) ----------
+// Le HTML n'est PAS visible en mode immersif : pour lire des chiffres dans le casque
+// il faut les dessiner dans la scène. Ce panneau affiche la résolution du framebuffer
+// REELLEMENT obtenue — la spec WebXR autorise le navigateur à le redimensionner quand
+// il veut, et le navigateur du Quest baisse la résolution tout seul quand le GPU
+// sature. C'est le seul moyen de savoir si notre réglage est honoré ou ignoré.
+const probe = (() => {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 200;
+  const tex = new THREE.CanvasTexture(c);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.24),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
+  m.position.set(0, -0.28, -1); m.renderOrder = 1000; m.frustumCulled = false; m.visible = false;
+  m.userData.ctx = c.getContext('2d'); m.userData.tex = tex;
+  return m;
+})();
+cam3.add(probe);
+let probeT = 0, probeFrames = 0, probeFps = 0;
+function updateProbe(dt) {
+  probe.visible = PROBE_ON;
+  if (!PROBE_ON) return;
+  probeFrames++; probeT += dt;
+  if (probeT < 0.5) return;
+  probeFps = Math.round(probeFrames / probeT); probeFrames = 0; probeT = 0;
+  let fbw = '?', fbh = '?', natif = '?';
+  try {
+    const bl = renderer.xr.getBaseLayer && renderer.xr.getBaseLayer();
+    if (bl) { fbw = bl.framebufferWidth || bl.textureWidth || '?'; fbh = bl.framebufferHeight || bl.textureHeight || '?'; }
+    const s = renderer.xr.getSession && renderer.xr.getSession();
+    if (s && window.XRWebGLLayer && XRWebGLLayer.getNativeFramebufferScaleFactor)
+      natif = XRWebGLLayer.getNativeFramebufferScaleFactor(s).toFixed(2);
+  } catch (e) {}
+  const r = renderer.info.render;
+  const x = probe.userData.ctx;
+  x.clearRect(0, 0, 512, 200);
+  x.fillStyle = 'rgba(6,14,28,0.86)'; x.fillRect(0, 0, 512, 200);
+  x.fillStyle = '#7ef'; x.font = 'bold 30px monospace';
+  x.fillText(probeFps + ' img/s', 14, 40);
+  x.fillStyle = '#fff'; x.font = '25px monospace';
+  x.fillText('rendu   ' + fbw + ' x ' + fbh, 14, 78);
+  x.fillText('demande ' + FB_SCALE.toFixed(1) + '   natif ' + natif, 14, 112);
+  x.fillText('draws ' + r.calls + '   tris ' + Math.round(r.triangles / 1000) + 'k', 14, 146);
+  x.fillStyle = '#fd8'; x.font = '20px monospace';
+  x.fillText('build 10', 14, 180);
+  probe.userData.tex.needsUpdate = true;
+}
+
 let vrReady = false, jumpReady = true;
 renderer.xr.addEventListener('sessionstart', () => {
   if (!hero) { toast('⏳ Perso en cours de chargement…'); vrReady = false; return; }
@@ -1341,6 +1404,7 @@ renderer.setAnimationLoop((t) => {
     cam3.lookAt(hero.position.x, eyeY, hero.position.z);
     cullRunner(hero.position.x, hero.position.z);          // le culling suit le perso, où qu'il aille
   } else ctr.update();
+  updateProbe(dt);              // sonde VR : lit la résolution RÉELLEMENT obtenue
   renderer.render(scene, cam);
 });
 </script>
