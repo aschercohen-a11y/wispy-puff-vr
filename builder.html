@@ -1027,6 +1027,8 @@ trainSel.onchange = () => { curTrain = trainSel.value; rebuildTrains(); schedule
 
 // ---------- MODE JEU : RUNNER (Subway Surfers) sur la route construite ----------
 let playMode = false, hero = null, heroMix = null, heroFoot = 0;
+const HERO_ACT = {};   // nom du clip -> AnimationAction (tous joués en permanence, mélangés par leur poids)
+const A_IDLE = 'Lower_Weapon_Look_Raise', A_WALK = 'Walking', A_RUN = 'Running', A_JUMP = 'Jump_Over_Obstacle_2';
 // ---------- Mode Jeu : DÉPLACEMENT LIBRE ----------
 // (avant : runner sur rail, le perso avançait tout seul sur la plus longue route
 // et ne pouvait que changer de voie. Remplacé par une marche libre : on va où on veut.)
@@ -1053,9 +1055,39 @@ new GLTFLoader().load('models/character.glb', (g) => {
   hero = g.scene; hero.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(m => { if (m) m.side = THREE.DoubleSide; }); } });
   hero.updateMatrixWorld(true); let b = new THREE.Box3().setFromObject(hero); hero.scale.setScalar(1.8 / ((b.max.y - b.min.y) || 1));
   hero.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(hero); heroFoot = -b.min.y;
-  if (g.animations && g.animations.length) { heroMix = new THREE.AnimationMixer(hero); const clip = g.animations[0].clone(); clip.tracks = clip.tracks.filter(t => !/\.position$/.test(t.name)); heroMix.clipAction(clip).play(); }
+  // character.glb contient 6 clips : Back_Jump, Jump_Over_Obstacle_2,
+  // Lower_Weapon_Look_Raise (= idle), Running, Walking, falling_down.
+  // L'ancien code ne jouait que g.animations[0], c'est-à-dire Back_Jump : le perso
+  // restait figé en boucle dans un saut en arrière (corps accroupi → enfoncé dans le
+  // sol, et bien sûr aucune marche). On charge maintenant tous les clips et on fond
+  // entre eux selon l'état réel.
+  if (g.animations && g.animations.length) {
+    heroMix = new THREE.AnimationMixer(hero);
+    for (const src of g.animations) {
+      const clip = src.clone();
+      // ⚠️ On retire UNIQUEMENT Hips.position (le root motion : le déplacement est
+      // piloté par la physique, sinon le perso part en avant puis re-snappe).
+      // Retirer les .position des AUTRES os déforme le modèle — la tête a une
+      // position de repos différente de sa position animée (bug connu, cf. vr.md).
+      clip.tracks = clip.tracks.filter(t => !/^Hips\.position$/.test(t.name));
+      const act = heroMix.clipAction(clip);
+      act.play(); act.setEffectiveWeight(0);
+      HERO_ACT[src.name] = act;
+    }
+    if (HERO_ACT[A_IDLE]) HERO_ACT[A_IDLE].setEffectiveWeight(1);
+  }
   hero.visible = false; scene.add(hero);
 });
+// Fond enchaîné vers le clip correspondant à l'état (poids lissés, pas de saut brutal).
+function heroAnim(dt, moving, sprint, airborne) {
+  if (!heroMix) return;
+  const want = airborne ? A_JUMP : (moving ? (sprint ? A_RUN : A_WALK) : A_IDLE);
+  for (const name in HERO_ACT) {
+    const act = HERO_ACT[name], target = (name === want) ? 1 : 0;
+    act.setEffectiveWeight(act.getEffectiveWeight() + (target - act.getEffectiveWeight()) * Math.min(1, dt * 9));
+  }
+  heroMix.update(dt);
+}
 function togglePlay(on) {
   playMode = on;
   document.getElementById('panel').style.display = on ? 'none' : '';
@@ -1216,13 +1248,13 @@ function updateVRRunner(dt) {
   // d'aller tout droit. Seul le stick droit change vrYaw. Le perso, lui, se contente de
   // s'orienter visuellement vers là où il marche (purement cosmétique, sans effet retour).
   if (inp.turn) vrYaw -= inp.turn * TURN_SPEED * dt;                 // stick droit : on pivote la vue
-  stepHero(dt, inp.mx, inp.mz, vrYaw, false);
+  const moving = stepHero(dt, inp.mx, inp.mz, vrYaw, false);
+  heroAnim(dt, moving, Math.hypot(inp.mx, inp.mz) > 0.85, runY > 0.05);
   // Rig joueur placé DERRIÈRE la direction de vue (et non derrière le perso, qui peut
   // marcher de côté ou à reculons sans que la caméra parte avec lui).
   const fx = Math.sin(vrYaw), fz = Math.cos(vrYaw);
   dolly.position.set(hero.position.x - fx * VR_BACK, runY + VR_UP, hero.position.z - fz * VR_BACK);
-  dolly.rotation.y = vrYaw + Math.PI;
-  if (heroMix) heroMix.update(dt);
+  dolly.rotation.y = vrYaw + Math.PI;   // (heroAnim a déjà avancé le mixer plus haut)
   cullRunner(dolly.position.x, dolly.position.z);   // masque les objets lointains → fluidité
 }
 
@@ -1231,7 +1263,9 @@ window.__builder = { placeTile, placeObject, refresh, cam3, ctr3, OBJ_ASSET, reb
   placeHalfXZ: (x, z, type, rot) => { const sx = Math.round(x / HG) * HG, sz = Math.round(z / HG) * HG, k = sx + '_' + sz; const m = ASSET[type].clone(true); m.position.set(sx, 0, sz); m.rotation.y = (rot || 0) * Math.PI / 2; worldGroup.add(m); halfTiles.set(k, { type, x: sx, z: sz, rot: rot || 0, mesh: m }); },
   barrierInfo: () => ({ armLoaded: !!BARRIER_ARM, count: barriers.length, sample: barriers[0] ? { px: barriers[0].px, pz: barriers[0].pz, angle: +barriers[0].angle.toFixed(2), gpos: barriers[0].group.position.toArray().map(v => +v.toFixed(1)) } : null }),
   clearSilent: () => { clearAllSilent(); scheduleTrains(); refresh(); }, scene, getBlimp: () => blimp,
-  getHero: () => hero, heroPos: () => hero ? [hero.position.x, hero.position.y, hero.position.z] : null };
+  getHero: () => hero, heroPos: () => hero ? [hero.position.x, hero.position.y, hero.position.z] : null,
+  animWeights: () => { const o = {}; for (const k in HERO_ACT) o[k] = +HERO_ACT[k].getEffectiveWeight().toFixed(2); return o; },
+  heroFootY: () => { if (!hero) return null; hero.updateMatrixWorld(true); return +(new THREE.Box3().setFromObject(hero)).min.y.toFixed(3); } };
 
 // ---------- Boucle ----------
 let _lt = 0;
@@ -1266,10 +1300,10 @@ renderer.setAnimationLoop((t) => {
     const fwd = camTheta + Math.PI;                        // « avant » = à l'opposé de la caméra
     const moving = stepHero(dt, kb.mx, kb.mz, fwd, kb.sprint);
     if (!moving) hero.position.y = heroFoot + runY;        // immobile : on garde quand même la hauteur de saut
+    heroAnim(dt, moving, kb.sprint, runY > 0.05);          // idle / marche / course / saut
     const D = 9, eyeY = heroFoot + 1.6 + runY * 0.4;
     cam3.position.set(hero.position.x + Math.cos(camTheta) * D, eyeY + 3.9 + camPitch * 7, hero.position.z + Math.sin(camTheta) * D);
     cam3.lookAt(hero.position.x, eyeY, hero.position.z);
-    if (heroMix) heroMix.update(dt);
     cullRunner(hero.position.x, hero.position.z);          // le culling suit le perso, où qu'il aille
   } else ctr.update();
   renderer.render(scene, cam);
