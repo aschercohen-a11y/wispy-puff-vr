@@ -37,7 +37,7 @@
 </head>
 <body>
 <div id="panel">
-  <h3>🧱 Constructeur LEGO <span style="font-size:11px;font-weight:400;opacity:.75">build 7 · marche libre</span></h3>
+  <h3>🧱 Constructeur LEGO <span style="font-size:11px;font-weight:400;opacity:.75">build 8 · nettete reglable</span></h3>
   <small>Choisis une rubrique, clique un élément, puis clique sur la grille. Ça s'aimante tout seul.</small>
   <div id="pal"></div>
   <div class="grp">
@@ -71,6 +71,14 @@
     <button id="fit" class="act">🔭 Voir tout</button>
     <button id="hills" class="act">⛰️ Collines (fond)</button>
     <button id="litBtn" class="act">🌫️ Éclairage : plat</button>
+    <div class="grp" style="margin-top:6px">
+      <div class="lbl">🥽 Netteté VR (à régler AVANT d'entrer en VR)</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button id="fbDown" class="act" style="flex:0 0 42px">➖</button>
+        <span id="fbVal" style="flex:1;text-align:center;font-weight:bold">1.6</span>
+        <button id="fbUp" class="act" style="flex:0 0 42px">➕</button>
+      </div>
+    </div>
     <button id="play" class="act" style="background:#3fbf5a;color:#fff;font-size:14px">🎮 Jouer dans mon monde</button>
   </div>
   <div class="grp">
@@ -83,7 +91,7 @@
   🚶 <b>ZQSD / WASD / flèches</b> = te déplacer où tu veux · <b>Maj</b> = courir · <b>Espace</b> = sauter<br>
   🖱️ <b>Glisser la souris</b> = tourner la caméra (on avance dans la direction du regard) · <b>C</b> = revenir derrière le perso<br>
   🥽 En VR : <b>stick gauche</b> = se déplacer · <b>stick droit</b> = pivoter · <b>A / B</b> = sauter<br>
-  <span style="opacity:.6;font-size:11px">build 7 — si tu ne vois pas ce numéro, ton navigateur sert une version en cache</span><br>
+  <span style="opacity:.6;font-size:11px">build 8 — si tu ne vois pas ce numéro, ton navigateur sert une version en cache</span><br>
   <button id="playExit" style="margin-top:8px;padding:8px 16px;border:0;border-radius:6px;background:#d6553f;color:#fff;font-weight:bold;cursor:pointer">← Retour éditeur</button>
 </div>
 <div id="toast"></div>
@@ -104,7 +112,19 @@ scene.fog = new THREE.Fog(0xbfe0f6, 210, 680);   // portée étendue → les cha
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.xr.enabled = true;   // WebXR : runner jouable en VR sur le casque
-try { renderer.xr.setFramebufferScaleFactor(1.3); } catch (e) {}   // netteté (valeur d'origine) — le culling ajouté depuis paie la facture. Rebaisser à 1.0 si ça ne tient pas 72 img/s
+// Netteté VR = nombre de pixels rendus par œil. Réglable par l'utilisateur (il est
+// dans le casque, pas moi) et mémorisé. À noter : le casque couvre ~95° de champ par
+// œil contre 52° pour la caméra PC, donc à résolution égale chaque objet reçoit
+// environ deux fois moins de pixels qu'à l'écran — d'où un besoin de suréchantillonner.
+// ⚠️ Doit être appliqué AVANT le démarrage de la session : three.js s'en sert pour
+// dimensionner le XRWebGLLayer, le changer pendant une session n'a aucun effet.
+let FB_SCALE = parseFloat(localStorage.getItem('wispy_fbscale') || '1.6');
+if (!(FB_SCALE > 0.5 && FB_SCALE < 3)) FB_SCALE = 1.6;
+function applyFbScale() {
+  try { renderer.xr.setFramebufferScaleFactor(FB_SCALE); } catch (e) {}
+  const el = document.getElementById('fbVal'); if (el) el.textContent = FB_SCALE.toFixed(1);
+}
+applyFbScale();
 document.body.appendChild(renderer.domElement);
 const vrBtn = VRButton.createButton(renderer); vrBtn.style.zIndex = 70; document.body.appendChild(vrBtn);   // bouton « Enter VR » (visible sur le Quest)
 const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();   // filtrage anisotrope max → textures nettes même de biais (rue qui fuit)
@@ -861,6 +881,15 @@ document.getElementById('hills').onclick = () => { hillsOn = !hillsOn; const b =
 document.getElementById('hills').style.background = '#7cbf5e'; document.getElementById('hills').style.color = '#023';
 document.getElementById('litBtn').onclick = toggleLighting;
 applyLighting();   // état initial (mémorisé dans localStorage)
+function bumpFb(d) {
+  FB_SCALE = Math.round(Math.min(2.4, Math.max(0.8, FB_SCALE + d)) * 10) / 10;
+  try { localStorage.setItem('wispy_fbscale', String(FB_SCALE)); } catch (e) {}
+  applyFbScale();
+  toast(renderer.xr.isPresenting ? '🥽 Netteté ' + FB_SCALE.toFixed(1) + ' — sors et rentre en VR pour l\'appliquer' : '🥽 Netteté VR : ' + FB_SCALE.toFixed(1), 2600);
+}
+document.getElementById('fbUp').onclick = () => bumpFb(+0.2);
+document.getElementById('fbDown').onclick = () => bumpFb(-0.2);
+applyFbScale();   // met aussi à jour l'affichage une fois le DOM prêt
 
 // ---------- Dirigeable pub « BURGO » qui orbite lentement au-dessus de la ville ----------
 let blimp = null, blimpA = 0;
