@@ -37,7 +37,7 @@
 </head>
 <body>
 <div id="panel">
-  <h3>🧱 Constructeur LEGO <span style="font-size:11px;font-weight:400;opacity:.75">build 10 · sonde VR</span></h3>
+  <h3>🧱 Constructeur LEGO <span style="font-size:11px;font-weight:400;opacity:.75">build 11 · sonde texture</span></h3>
   <small>Choisis une rubrique, clique un élément, puis clique sur la grille. Ça s'aimante tout seul.</small>
   <div id="pal"></div>
   <div class="grp">
@@ -92,7 +92,7 @@
   🚶 <b>ZQSD / WASD / flèches</b> = te déplacer où tu veux · <b>Maj</b> = courir · <b>Espace</b> = sauter<br>
   🖱️ <b>Glisser la souris</b> = tourner la caméra (on avance dans la direction du regard) · <b>C</b> = revenir derrière le perso<br>
   🥽 En VR : <b>stick gauche</b> = se déplacer · <b>stick droit</b> = pivoter · <b>A / B</b> = sauter<br>
-  <span style="opacity:.6;font-size:11px">build 10 — si tu ne vois pas ce numéro, ton navigateur sert une version en cache</span><br>
+  <span style="opacity:.6;font-size:11px">build 11 — si tu ne vois pas ce numéro, ton navigateur sert une version en cache</span><br>
   <button id="playExit" style="margin-top:8px;padding:8px 16px;border:0;border-radius:6px;background:#d6553f;color:#fff;font-weight:bold;cursor:pointer">← Retour éditeur</button>
 </div>
 <div id="toast"></div>
@@ -1242,9 +1242,9 @@ cam3.add(vignette);
 // il veut, et le navigateur du Quest baisse la résolution tout seul quand le GPU
 // sature. C'est le seul moyen de savoir si notre réglage est honoré ou ignoré.
 const probe = (() => {
-  const c = document.createElement('canvas'); c.width = 512; c.height = 200;
+  const c = document.createElement('canvas'); c.width = 620; c.height = 200;
   const tex = new THREE.CanvasTexture(c);
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.24),
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.23),
     new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
   m.position.set(0, -0.28, -1); m.renderOrder = 1000; m.frustumCulled = false; m.visible = false;
   m.userData.ctx = c.getContext('2d'); m.userData.tex = tex;
@@ -1268,16 +1268,27 @@ function updateProbe(dt) {
   } catch (e) {}
   const r = renderer.info.render;
   const x = probe.userData.ctx;
-  x.clearRect(0, 0, 512, 200);
-  x.fillStyle = 'rgba(6,14,28,0.86)'; x.fillRect(0, 0, 512, 200);
+  x.clearRect(0, 0, 620, 200);
+  x.fillStyle = 'rgba(6,14,28,0.86)'; x.fillRect(0, 0, 620, 200);
   x.fillStyle = '#7ef'; x.font = 'bold 30px monospace';
   x.fillText(probeFps + ' img/s', 14, 40);
   x.fillStyle = '#fff'; x.font = '25px monospace';
   x.fillText('rendu   ' + fbw + ' x ' + fbh, 14, 78);
   x.fillText('demande ' + FB_SCALE.toFixed(1) + '   natif ' + natif, 14, 112);
   x.fillText('draws ' + r.calls + '   tris ' + Math.round(r.triangles / 1000) + 'k', 14, 146);
-  x.fillStyle = '#fd8'; x.font = '20px monospace';
-  x.fillText('build 10', 14, 180);
+  // Taille RÉELLE de la texture une fois en mémoire. Chromium sait réduire une image
+  // au décodage sur un appareil à mémoire contrainte : si le fichier fait 4096 et que
+  // cette ligne affiche moins, c'est le navigateur qui l'a rétrécie, et aucun réglage
+  // de rendu n'y changera jamais rien.
+  let tw = '?';
+  try {
+    const a = OBJ_ASSET.petit_bakery || OBJ_ASSET.grand1;
+    if (a) a.traverse(o => { if (o.isMesh && o.material && o.material.map && o.material.map.image) tw = o.material.map.image.width; });
+  } catch (e) {}
+  x.fillStyle = '#8f8'; x.font = '25px monospace';
+  x.fillText('texture enseigne : ' + tw, 14, 180);
+  x.fillStyle = '#fd8'; x.font = '18px monospace';
+  x.fillText('build 11', 400, 180);
   probe.userData.tex.needsUpdate = true;
 }
 
