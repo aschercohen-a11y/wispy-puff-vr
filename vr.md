@@ -7,9 +7,31 @@
 
 ---
 
-## 🔬 SESSION 2026-08-03 — NETTETÉ VR RETROUVÉE (builder.html) — LIRE EN PREMIER
+## 🔬 SESSION 2026-08-03 — builder.html : NETTETÉ, MARCHE LIBRE, ET LA MESURE QUI CHANGE TOUT — LIRE EN PREMIER
 
-> Constat du user : « les immeubles rendent mal en VR, c'était plus immersif au début ». **Ce n'était pas Meshy.**
+> Point de départ : « les immeubles rendent mal en VR, c'était plus immersif au début ». **Ce n'était pas Meshy.**
+
+### 🚨 LA MESURE À CONNAÎTRE AVANT TOUTE OPTIMISATION
+
+Relevé **dans le casque** via la sonde (build 10), Quest 3, carte complète du user :
+
+```
+90 img/s                          ← le MAXIMUM du Quest 3
+rendu   5040 x 2640               ← 2520 x 2640 par œil
+demande 2.0   natif 1.00          ← la demande est parfaitement honorée
+draws 238   tris 713k
+```
+
+**Conclusion : il n'y a AUCUN problème de performance ni de résolution.** La dalle du Quest 3 fait 2064×2208 par œil — on suréchantillonne déjà. Il reste une très grosse réserve de GPU.
+
+**Trois hypothèses invalidées par cette mesure, ne pas les refaire :**
+- ❌ « le navigateur bride la résolution quand le GPU sature » (la spec autorise le redimensionnement à tout moment, mais **ici il ne se produit pas**)
+- ❌ « il faut monter le framebuffer » (1.3 → 1.6 → 2.0 : aucun effet perçu, et pour cause, c'était déjà au-delà de la dalle)
+- ❌ « il faut monter les textures » (2048 → 4096 sur les enseignes : aucun effet perçu)
+
+**Ce qui reste ouvert :** sur la photo, le texte de la sonde et le trottoir sortent **nets**, seules les façades sont molles → la chaîne d'affichage est saine, c'est la texture qui manque de détail à l'écran. Dernière piste testable : Chromium (dont dérive le navigateur du Quest) **réduit parfois une image au décodage** sur appareil à mémoire contrainte — un 4096×4096 pèse 64 Mo décodé. La sonde du **build 11** affiche `map.image.width` réel des enseignes. **Référence PC : 4096.** Si le casque affiche moins → découper les grandes textures ; s'il affiche 4096 → c'est l'optique du casque (95° de champ contre 52° pour la caméra PC, donc ~2× moins de pixels par degré) et il faut arrêter d'optimiser la netteté pour travailler l'**ombrage, le contraste et les silhouettes**, qui sont ce qui rend beau en VR.
+
+**⚠️ Méthode : ne plus jamais corriger la VR à l'aveugle.** Les tests headless (`dev/*.js`) ne tournent **que sur PC**, et 3 bugs de cette session n'existaient que dans le chemin VR. Une **photo du casque** a réglé en une fois ce que 3 h de suppositions n'avaient pas résolu. Le repère `build N` en tête du panneau permet de vérifier quelle version tourne réellement.
 
 **3 causes mesurées, toutes corrigées :**
 
@@ -33,7 +55,39 @@
 
 **🗄️ Cache — piège majeur corrigé.** Le `Dockerfile` n'envoyait **aucun `Cache-Control`** : les navigateurs appliquaient un cache heuristique portant **aussi sur les `.glb`**. Le casque pouvait donc charger la nouvelle page **avec les anciens modèles 512** — rendu dégradé, impossible à diagnostiquer, et un simple Ctrl+Shift+R ne suffit pas. Désormais `add_header Cache-Control "no-cache" always` (revalidation, 304 si inchangé → coût négligeable) + types MIME `model/gltf-binary` et `image/webp`. Un **repère de version** est affiché en tête du panneau (`v2026-08-03 · HD`) pour vérifier d'un coup d'œil, dans le casque, quelle version est chargée.
 
-**Reste à faire :** l'**instancing** (aucun `InstancedMesh` aujourd'hui ; 34 lampadaires + 21 palmiers = 55 draw calls évitables) — c'est le prochain gisement si la fluidité coince.
+**📐 Enseignes en 4096.** `row_grand` et `row_petit` contiennent **3 boutiques chacun partageant un seul atlas** : à 2048, chaque devanture ne disposait que de ~680 px de large. Ce sont les **seuls** modèles dont l'original dépasse 2048 (vérifié sur les 30) → réexportés en 4096. Partout ailleurs 2048 est déjà le maximum disponible, inutile de chercher.
+
+**🥽 Réglages exposés à l'utilisateur** (il est dans le casque, pas moi — évite un redéploiement par essai) : **Netteté VR** ➖/➕ (`FB_SCALE`, 0.8→2.4, défaut 1.6) et **🔎 Sonde VR**. Les deux en localStorage. ⚠️ La netteté doit être réglée **avant** d'entrer en VR : three.js dimensionne le `XRWebGLLayer` au démarrage de la session, la changer pendant n'a aucun effet.
+
+**🔎 La sonde VR** (`updateProbe`) : le HTML n'est **pas visible en mode immersif**, donc le panneau est un `PlaneGeometry` avec `CanvasTexture` attaché à `cam3` (`depthTest: false`, comme la vignette). Affiche img/s, résolution réelle du framebuffer (`renderer.xr.getBaseLayer().framebufferWidth`), facteur natif (`XRWebGLLayer.getNativeFramebufferScaleFactor`), `renderer.info.render.calls`/`.triangles`, et la largeur réelle de la texture des enseignes.
+
+---
+
+### 🚶 MODE JEU — le runner sur rail remplacé par la MARCHE LIBRE
+
+Le perso était verrouillé sur la plus longue route, avançait seul à 13 u/s, ne pouvait que changer de voie (3 voies) et bouclait ; le mode refusait même de démarrer sans route. Désormais : **on va où on veut**.
+
+- **PC** : ZQSD / WASD / flèches (AZERTY et QWERTY ensemble), **Maj** = courir, **Espace** = sauter, **C** = recadrer. Déplacement **relatif à la caméra**, souris = orbite.
+- **VR** : stick gauche = se déplacer, stick droit = pivoter, **A/B** = sauter.
+- Apparition : la plus longue route s'il y en a une, sinon le centre de ce qui est construit.
+- `WALK_SPEED = 7.5`, `SPRINT_SPEED = 14`, `TURN_SPEED = 2.4`, `JUMP_V = 9.5`, `GRAV = 26`.
+
+**⚠️ 4 bugs corrigés, dont 3 invisibles sur PC :**
+
+1. **VR : le perso tournait en rond au lieu d'avancer.** Le déplacement était exprimé dans le repère **du perso**, alors que le perso pivote vers sa direction de marche → boucle de rétroaction. Simulation à 72 img/s, stick plein à droite 3 s : il **revient exactement à son point de départ** (distance parcourue 0,00), il décrivait un cercle. → repère = **`vrYaw`** (la vue, que seul le stick droit change) ; le perso ne fait plus que s'orienter visuellement, sans effet retour.
+2. **Gauche ↔ droite inversées.** `droite = avant × haut = (−fz, fx)`, or le code avait `(fz, −fx)` : c'était la **gauche**. Inversé sur les 4 caps testés. Découvert au passage : la caméra PC était posée en `(cos θ, sin θ)` alors que `stepHero` interprète l'angle en `(sin θ, cos θ)` — conventions symétriques, axe d'avance faussé aussi. **Une seule convention partout désormais : cap θ → avant = `(sin θ, cos θ)`**, celle de `rotation.y` de three.js.
+3. **Perso « à moitié sous le sol » et qui ne marche pas.** Le chargeur ne jouait que `g.animations[0]` = **`Back_Jump`** : figé en boucle dans un saut en arrière, corps accroupi. `character.glb` a **6 clips** : `Back_Jump`, `Jump_Over_Obstacle_2`, `Lower_Weapon_Look_Raise` (idle), `Running`, `Walking`, `falling_down`. Tous montés en `AnimationAction` et mélangés par leur poids selon l'état (`heroAnim`). Corrigé aussi : le code retirait **toutes** les pistes `.position` alors que les 24 os en ont une → ne retirer que **`Hips.position`** (root motion), sinon la tête se déforme (bug déjà documenté).
+4. **VR : le saut était déclenché par la GÂCHETTE** (`bi === 0`), celle où l'index repose naturellement → saut permanent, donc pose accroupie en boucle. Symptômes identiques au point 3 et **invisibles sur PC** où le saut passe par Espace. → saut limité à **A/B** (index 4 et 5).
+
+**Pièges du mode Jeu :** le culling suit le perso partout, donc `togglePlay(false)` doit **tout ré-afficher** (sinon la moitié de la ville reste invisible dans l'éditeur). Les touches sont suivies par un `Set` vidé sur `blur`. `refresh()` réapplique le mode d'éclairage (les objets posés sont clonés depuis des matériaux plats).
+
+**Tests ajoutés** (tous **sans le moindre clic souris** — rappel : la carte de prod a été écrasée 2× par des tests qui déclenchaient `scheduleSave`) : `dev/test_walk.js` (ne court plus seul / avance / s'arrête), `dev/test_anim.js` (idle 1.00 au repos, Walking 0.98 en marche), `dev/test_dirs.js` (les 4 directions projetées sur les **axes réels de la caméra** — une 1ʳᵉ version mesurait la position écran du perso, or la caméra le suit, donc cette valeur est constante et valait 0 quoi qu'il arrive), `dev/shot_hero.js` (capture rapprochée pour vérifier les pieds au sol).
+
+**Encore ouvert sur le perso** (choix, pas bugs) : aucune **collision** (il traverse les bâtiments) · **échelle** 1,8 unité, il paraît petit face aux lampadaires.
+
+---
+
+**Reste à faire :** l'**instancing** (aucun `InstancedMesh` ; 34 lampadaires + 21 palmiers = 55 draw calls évitables) — mais **plus du tout prioritaire** vu les 90 img/s mesurés. Avec cette réserve, viser plutôt ce qui rend beau en VR : **ombres portées** au sol, ciel/atmosphère, contraste.
 
 ---
 
